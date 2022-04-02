@@ -1,0 +1,1493 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<title>TeslaUSB</title>
+
+<style>
+html {
+  height: 100%;
+}
+
+* {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  height: calc(100% - 16px);
+}
+
+.recordings {
+  width:100%;
+  height:100%;
+}
+
+/* The map doesn't resize properly in Firefox sometimes, ending up with scrollbars. Use Chrome instead. */
+#sentrymap {
+  width:100%;
+  height:100%;
+  border: 0;
+}
+
+.tabholder {
+  position: relative;
+}
+
+.tab {
+  position: absolute;
+  top: 30px;
+  left: 0;
+  visibility: hidden;
+}
+
+.tabheader { display: none; }
+.tabheader + label { display: inline-block }
+
+.tabheader ~ .tab { visibility: hidden; }
+#tab1:checked ~ .tab.content1,
+#tab2:checked ~ .tab.content2,
+#tab3:checked ~ .tab.content3,
+#tab4:checked ~ .tab.content4,
+#tab5:checked ~ .tab.content5,
+#tab6:checked ~ .tab.content6 { visibility: visible;
+}
+
+.tabheader + label {
+  padding: 4px 12px;
+  position: relative;
+  top: 2px;
+  color: #444;
+}
+.tabheader:hover + label {
+  border-bottom: 3px solid #AAA;
+  color: #000;
+  z-index:10;
+}
+
+.tabheader:checked + label {
+  border-bottom: 3px solid red;
+  color: #000;
+  z-index:11;
+}
+
+.tabheader ~ .tab {
+  border-top: 1px solid #DDD;
+  padding: 2px;
+  width:100%;
+  height:100%;
+}
+
+button {
+  padding:6px;
+}
+
+.tabholder {
+  width:100%;
+  height:calc(100% - 60px);
+}
+
+.mypre {
+  width:100%;
+  height:calc(100% - 60px);
+  padding-top:4px;
+  padding-bottom:4px;
+  overflow:auto;
+  border-top:1px solid black;
+  border-bottom:1px solid black;
+}
+
+td {
+  padding:0px;
+}
+
+video {
+  padding:0px;
+}
+
+.flipped {
+  -moz-transform: scale(-1, 1);
+  -webkit-transform: scale(-1, 1); -o-transform: scale(-1, 1);
+  transform: scale(-1, 1); filter: FlipH;
+}
+
+#videoholder {
+  background-color: #333;
+}
+
+.navbar {
+  overflow: hidden;
+  background-color: #333;
+}
+
+.navbar a {
+  float: left;
+  font-size: 16px;
+  color: white;
+  text-align: center;
+  padding: 14px 16px;
+  text-decoration: none;
+}
+
+.subnav {
+  float: left;
+  overflow: hidden;
+}
+
+.subnav .subnavbtn {
+  font-size: 16px;
+  border: none;
+  outline: none;
+  color: white;
+  padding: 14px 16px;
+  background-color: inherit;
+  font-family: inherit;
+  margin: 0;
+}
+
+.subnav .layoutbtn {
+  font-size: 16px;
+  border: none;
+  outline: none;
+  color: white;
+  padding: 6px;
+  background-color: inherit;
+  font-family: inherit;
+  margin: 0;
+}
+
+
+.navbar a:hover, .subnav:hover .subnavbtn {
+  background-color: rgb(100,100,100);
+}
+
+.navbar a:hover, .subnav:hover .layoutbtn {
+  background-color: rgb(100,100,100);
+}
+
+.navbar a:hover, .subnav:hover .layoutbtn .layoutsvg {
+  background-color: rgb(100,100,100);
+  fill: white;
+  stroke: white;
+  stroke-width: 1px;
+}
+
+.layoutsvg {
+  width: 100%;
+  height: 100%;
+  fill: grey;
+  stroke: grey;
+  stroke-width: 1px;
+  opacity: 1;
+  margin-top: 2px;
+  margin-left: 1px;
+}
+
+.subnav-content {
+  display: none;
+  position: absolute;
+  left: 0;
+  background-color: rgba(100,100,100,0.7);
+  width: 70%;
+  z-index: 12;
+}
+
+.subnav-content .dropdownitem {
+  float: left;
+  color: white;
+  text-decoration: none;
+  padding: 14px 8px;
+}
+
+.subnav-content .selecteddropdownitem {
+  float: left;
+  color: white;
+  text-decoration: underline 2px;
+  font-weight: bold;
+  padding: 14px 8px;
+}
+
+.subnav-content .dropdownitem:hover {
+  background-color: #eee;
+  color: black;
+}
+
+.subnav-content .selecteddropdownitem:hover {
+  background-color: #eee;
+  color: black;
+}
+
+.subnav:hover .subnav-content {
+  display: block;
+}
+
+.slider {
+    margin-left: .4rem;
+    margin-right: .4rem;
+    margin-top: .4rem;
+    margin-bottom: 0;
+}
+
+#videocontrols {
+  opacity: 0.0;
+  z-index: 2;
+  margin: auto;
+  position: fixed;
+  bottom: 0;
+  width: calc(100% - 200px);
+  height: 100px;
+  background-color: #555;
+  transition: opacity 0.5s;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding-bottom: 8px;
+  margin-left: 100px;
+  margin-right: 100px;
+}
+
+#videocontrols:hover {
+  opacity: 0.7;
+  transition: opacity 0.5s;
+}
+
+#videocontrols.shown {
+  opacity: 0.7;
+  transition: opacity 0.5s;
+}
+
+.settingsbutton {
+  width: 100%;
+  height: 100%;
+  fill: grey;
+  stroke: grey;
+  stroke-width: 1px;
+  opacity: 1;
+}
+
+.settingsbutton:hover {
+  width: 100%;
+  height: 100%;
+  fill: black;
+  stroke: black;
+  stroke-width: 1px;
+  opacity: 1;
+}
+
+.mediabutton {
+  width: 100%;
+  height: 100%;
+  fill: black;
+  stroke: black;
+  stroke-width: 3px;
+}
+
+.mediabutton:hover {
+  fill: white;
+  stroke: white;
+  width: 100%;
+  height: 100%;
+}
+
+/* the play/pause button is done with CSS in Chrome, and html/javascript
+   in Firefox, because Firefox doesn't support setting paths in css */
+.play svg path {
+  d: path('M 8,30 30,18 8,6 z') !important;
+}
+
+.pause svg path {
+  d: path('M 8,30 14,30 14,6 8,6 z M 24,30 30,30 30,6 24,6 z') !important;
+}
+
+/* Firefox doesn't support setting svg paths in css, so these are set
+   in the html instead. */
+.skipback svg path {
+  fill: none;
+  /* d: path('M 19,28 A 10,10 0 1 0 9,18 M 8,18 10,18 9,20 z') !important; */
+}
+
+.skipforward svg path {
+  fill: none;
+  /* d: path('M 19,28 A 10,10 0 1 1 29,18 M 28,18 30,18 29,20 z') !important; */
+}
+
+.flatbutton {
+  width: 50px;
+  height: 50px;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  border-radius: 0px;
+  display: inline-block;
+  margin: 0 auto;
+}
+
+.buttoncontainer {
+  margin: 0 auto;
+  display: inline-block;
+}
+
+.flatbutton:hover {
+  color: white;
+}
+
+</style>
+</head>
+<body>
+
+<div class="tabholder">
+
+<input class="tabheader" type="radio" name="tabs" id="tab1" />
+<label for="tab1">Diagnostics</label>
+
+<input class="tabheader" type="radio" name="tabs" id="tab2" />
+<label for="tab2">Archiveloop log</label>
+
+<input class="tabheader" type="radio" name="tabs" id="tab3" />
+<label for="tab3">Setup log</label>
+
+<input class="tabheader" type="radio" name="tabs" id="tab4" />
+<label for="tab4">Tools</label>
+
+<input class="tabheader" type="radio" name="tabs" id="tab5" />
+<label for="tab5">Recordings</label>
+
+<input class="tabheader" type="radio" name="tabs" id="tab6" checked />
+<label for="tab6">Viewer</label>
+
+<div style="float:right;">
+<div style="float:left;margin-top: 7px;margin-left: 0px;margin-right: 5px;">
+<a href="/new/?source=legacy" target="_self" style="margin-right: 2em;">Try new UI</a>
+<a href="https://www.github.com/marcone/teslausb" target="_blank" style="font-size:70%;">TeslaUSB on GitHub</a>
+</div>
+<!--
+<div style="padding-left:5px;font-size:200%;float:right;">
+<svg class="settingsbutton" width="25px" height="25px" viewBox="0 0 40 40">
+  <path d="M12 6l1-5c1-1 7-1 8 0l1 5a10 10 0 015 4l-16 6zM24.892 7.67l4.83-1.634c1.366.366 4.366 5.562 4 6.928l-3.83 3.366a10 10 0 01-.964 6.33L15.732 11.804zM29.892 19.67l3.83 3.366c.366 1.366-2.634 6.562-4 6.928l-4.83-1.634a10 10 0 01-5.964 2.33l2.804-16.856zM22 30l-1 5c-1 1-7 1-8 0l-1-5a10 10 0 01-5-4l16-6zM9.108 28.33l-4.83 1.634c-1.366-.366-4.366-5.562-4-6.928l3.83-3.366a10 10 0 01.964-6.33l13.196 10.856zM4.108 16.33l-3.83-3.366c-.366-1.366 2.634-6.562 4-6.928l4.83 1.634a10 10 0 015.964-2.33l-2.804 16.856z"/>
+</svg>
+</div>
+-->
+</div>
+
+<div class="tab content1">
+<div style="width:100%;height:100%">
+<pre class="mypre" id="diagnosticspre">...</pre>
+<p>
+<button class="group1" id="diagrefreshbtn" onclick="refreshdiagnostics();">Refresh diagnostics</button>
+<button class="group1" id="diagdwnbtn" onclick="download('diagnostics.txt', document.getElementById('diagnosticspre').textContent);">Download diagnostics</button>
+</div>
+</div>
+
+<div class="tab content2">
+<div style="width:100%;height:100%">
+<pre class="mypre" id="archivelooppre">Loading...</pre>
+<p>
+<button class="group1" id="aldwnbtn" onclick="download('archiveloop.log', document.getElementById('archivelooppre').textContent);">Download archiveloop log</button>
+</div>
+</div>
+
+<div class="tab content3">
+<div style="width:100%;height:100%">
+<pre class="mypre" id="setuplogpre">Loading...</pre>
+<p>
+<button class="group1" id="sudwnbtn" onclick="download('teslausb-headless-setup.log', document.getElementById('setuplogpre').textContent);">Download setup log</button>
+</div>
+</div>
+
+<div class="tab content4">
+<div style="width:100%;height:100%">
+<p>
+<button class="group2" onclick="syncfunc();">Trigger archive/sync</button><span id="synctext" style="padding-left:20px"></span>
+<p>
+<button class="group2" id="rebootbutton" onclick="rebootfunc(this);">Restart Raspberry Pi</button><span id="reboottext" style="padding-left:20px"></span>
+</div>
+</div>
+
+<div class="tab content5">
+<div style="width:100%;height:100%;">
+<iframe class="recordings" src="TeslaCam/" onload="hideRecordingParent();"></iframe>
+</div>
+</div>
+
+<div class="tab content6">
+<div style="width:100%;height:100%;">
+<div class="navbar">
+  <div class="subnav">
+    <button class="subnavbtn">RecentClips</button>
+    <div id="RecentClips" class="subnav-content"></div>
+  </div>
+  <div class="subnav">
+    <button class="subnavbtn">SavedClips</button>
+    <div id="SavedClips" class="subnav-content"></div>
+  </div>
+  <div class="subnav">
+    <button class="subnavbtn">SentryClips</button>
+    <div id="SentryClips" class="subnav-content"></div>
+  </div>
+  <div class="subnav" style="float:right;">
+    <button class="layoutbtn">
+    <svg class="layoutsvg" width="52px" height="26px" viewBox="0 0 26 13">
+      <path d="M 2 6 L 8 6 L 8 2 L 2 2 z M 10 6 L 16 6 L 16 2 L 10 2 z M 18 6 L 24 6 L 24 2 L 18 2 z M 2 12 L 8 12 L 8 8 L 2 8 z M 10 12 L 16 12 L 16 8 L 10 8 z M 18 12 L 24 12 L 24 8 L 18 8 z"/>
+    </svg></button>
+    <div id="layouts" class="subnav-content" style="left:initial;right:0;width:180px;">
+    <div class="dropdownitem" onclick="setLayout(1)">Sides on top, rear on bottom, mirrored</div>
+    <div class="dropdownitem" onclick="setLayout(2)">Side and rear on bottom, mirrored</div>
+    <div class="dropdownitem" onclick="setLayout(3)">Side and rear on bottom, looking back</div>
+    </div>
+  </div>
+</div>
+<div>
+<table id="videoholder" style="width:100%;height:100%;" cellspacing="0" onmousemove="showcontrols()">
+<tr>
+  <td id="topleft" width="33%">
+  <div id="leftviewholder" style="display:grid;">
+      <video id="leftview" class="flipped" width="100%" style="grid-column:1;grid-row:1;z-index:1;"></video>
+      <canvas id="leftviewfreeze" style="grid-column:1;grid-row:1;z-index:0;width:100%;height:100%;"></canvas>
+  </div>
+  </td>
+  <td id="topmiddle" width="34%">
+  <div id="frontviewholder" style="display:grid;">
+      <video id="frontview" width="100%" style="grid-column:1;grid-row:1;z-index:1;"></video>
+      <canvas id="frontviewfreeze" style="grid-column:1;grid-row:1;z-index:0;width:100%;height:100%;"></canvas>
+  </div>
+  </td>
+  <td id="topright" width="33%">
+  <div id="rightviewholder" style="display:grid;">
+      <video id="rightview" class="flipped" width="100%" style="grid-column:1;grid-row:1;z-index:1;"></video>
+      <canvas id="rightviewfreeze" style="grid-column:1;grid-row:1;z-index:0;width:100%;height:100%;"></canvas>
+  </div>
+  </td>
+</tr>
+<tr>
+  <td id="bottomleft" height="100%">
+    <div id="mapholder" style="margin:0px;height:100%">
+      <iframe id="sentrymap"></iframe>
+    </div>
+  </td>
+  <td id="bottommiddle">
+  <div id="backviewholder" style="display:grid;">
+    <video id="backview" class="flipped" width="100%" style="grid-column:1;grid-row:1;z-index:1;"></video>
+    <canvas id="backviewfreeze" style="grid-column:1;grid-row:1;z-index:0;width:100%;height:100%;"></canvas>
+  </div>
+  </td>
+  <td id="bottomright">
+    <div id="infoholder" style="margin-left:12px;color:white;height:100%;">
+      <div id="sequencename" style="margin-top:12px;margin-bottom:2px;"></div>
+      <div id="sequencelocation" style="margin-top:7px;margin-bottom:7px;"></div>
+      <div id="segmentname" style="margin-top:7px;margin-bottom:12px;"></div>
+      <span id="currenttime" style="margin-top:24px;"></span><span id="totaltime"></span>
+      <div id="debuginfo"></div>
+    </div>
+  </td>
+</tr>
+</table>
+<div id="videocontrols" >
+  <input type="range" class="slider" id="position" name="position"
+         min="0" max="60" style="width:90%;max-width:600px;height:10%;">
+  <div id="tickmarks" style="width:90%;max-width:600px;height:10px;">
+    <canvas id="tickmarkscanvas" style="width:100%;height:100%;">
+  </div>
+  <div class="buttoncontainer">
+    <button id="skipback" class="flatbutton skipback" onclick="skipBack()">
+      <svg class="mediabutton"><path d="M 19,28 A 10,10 0 1 0 9,18 M 8,18 10,18 9,20 z"></path></svg>
+    </button>
+    <button id="playpause" class="flatbutton play" onclick="startPlaying()">
+      <svg class="mediabutton"><path></path></svg>
+    </button>
+    <button id="skipforward" class="flatbutton skipforward" onclick="skipForward()">
+      <svg class="mediabutton"><path d="M 19,28 A 10,10 0 1 1 29,18 M 28,18 30,18 29,20 z"></path></svg>
+    </button>
+  </div>
+</div>
+
+</div>
+</div>
+</div>
+
+<script>
+
+var isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
+
+var DEBUG = false;
+function log(what) {
+  if (DEBUG) {
+    console.log(what);
+  }
+}
+
+function hideRecordingParent() {
+  var i = document.querySelector(".recordings");
+  if (i.contentWindow.location.pathname === "/TeslaCam/") {
+    var parentlink = i.contentDocument.querySelector("#list tbody tr");
+    parentlink.parentElement.removeChild(parentlink);
+  }
+}
+
+function showDebugInfo() {
+  if (DEBUG == false) {
+    return;
+  }
+  var db = document.getElementById('debuginfo');
+  var debuginfo = "segments: " + currentsequence.currentSegmentIdx() + "/" + currentsequence.length();
+  debuginfo += ", position: ";
+  for (var vid of videoelems) {
+    if (vid == undefined) {
+      debuginfo = debuginfo + "unused/"
+    } else {
+      debuginfo = debuginfo + parseInt(vid.currentTime) + "/";
+    }
+  }
+  db.innerText = debuginfo;
+}
+
+function showcontrols() {
+  var c=document.getElementById("videocontrols");
+  if (c.classList.contains("shown")) {
+    return;
+  }
+  c.classList.add("shown");
+  setTimeout(function() { c.classList.remove("shown"); }, 5000);
+}
+
+showcontrols();
+
+var currentLayout = 1;
+
+function setLayout(layout) {
+  var tl = document.getElementById("topleft");
+  var tm = document.getElementById("topmiddle");
+  var tr = document.getElementById("topright");
+  var bl = document.getElementById("bottomleft");
+  var bm = document.getElementById("bottommiddle");
+  var br = document.getElementById("bottomright");
+  var leftviewholder = document.getElementById("leftviewholder");
+  var leftview = document.getElementById("leftview");
+  var frontviewholder = document.getElementById("frontviewholder");
+  var rightviewholder = document.getElementById("rightviewholder");
+  var rightview = document.getElementById("rightview");
+  var backviewholder = document.getElementById("backviewholder");
+  var backview = document.getElementById("backview");
+  var mapview = document.getElementById("mapholder");
+  var infoview = document.getElementById("infoholder");
+  if (layout == 2) {
+    // alternative layout 1: map-front-info on top, mirrorleft-mirrorrear-mirrorright on bottom
+    tl.appendChild(mapview);
+    tm.appendChild(frontviewholder);
+    tr.appendChild(infoview);
+    bl.appendChild(leftviewholder);
+    bm.appendChild(backviewholder);
+    br.appendChild(rightviewholder);
+    leftview.classList.add("flipped");
+    rightview.classList.add("flipped");
+    backview.classList.add("flipped");
+  } else if (layout == 3) {
+    // alternative layout 3: map-front-info on top, right-rear-left on bottom
+    tl.appendChild(mapview);
+    tm.appendChild(frontviewholder);
+    tr.appendChild(infoview);
+    bl.appendChild(rightviewholder);
+    bm.appendChild(backviewholder);
+    br.appendChild(leftviewholder);
+    leftview.classList.remove("flipped");
+    rightview.classList.remove("flipped");
+    backview.classList.remove("flipped");
+  } else {
+    // original layout: mirrorleft-front-mirrorright on top, map-mirrorrear-info on bottom
+    layout = 1;
+    tl.appendChild(leftviewholder);
+    tm.appendChild(frontviewholder);
+    tr.appendChild(rightviewholder);
+    bl.appendChild(mapview);
+    bm.appendChild(backviewholder);
+    br.appendChild(infoview);
+    leftview.classList.add("flipped");
+    rightview.classList.add("flipped");
+    backview.classList.add("flipped");
+  }
+  currentLayout = layout;
+  localStorage.setItem("layout", layout);
+}
+
+function cycleLayout() {
+  setLayout(currentLayout + 1);
+}
+
+setLayout(localStorage.layout);
+
+function skipBack() {
+  var slider=document.getElementById('position');
+  currentsequence.seekTo(parseInt(slider.value) - 10000);
+}
+
+function startPlaying() {
+  currentsequence.toggleplaypause();
+}
+
+function skipForward() {
+  var slider=document.getElementById('position');
+  currentsequence.seekTo(parseInt(slider.value) + 30000);
+}
+
+function download(filename, text) {
+  var elem = document.createElement('a');
+  elem.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(text));
+  elem.setAttribute('download', filename);
+  elem.style.display = 'none';
+  document.body.appendChild(elem);
+  elem.click();
+  document.body.removeChild(elem);
+}
+
+function cachebustingurl(url) {
+  return url + '?' + Math.random();
+}
+
+function starttailing({url, pre, button}) {
+  if (window.getComputedStyle(pre).visibility === "hidden") {
+    setTimeout(function() {
+                            starttailing({url:url, pre:pre, button:button});
+                          }, 1000);
+    return;
+  }
+  log("tail " + url);
+  if (pre.tailcorrection === undefined) {
+    pre.tailcorrection=0;
+  }
+  var tailpos=pre.textContent.length - 1 + pre.tailcorrection;
+  var request = new XMLHttpRequest();
+  request.open('GET', cachebustingurl(url));
+  request.setRequestHeader('Range', 'bytes=' + tailpos + '-' + (tailpos + 32768));
+  request.onreadystatechange = function () {
+    if (request.readyState === 4) {
+      if (request.status === 206) {
+        var scrollpos=pre.scrollTop+pre.clientHeight;
+        var scrollheight=pre.scrollHeight;
+        var shouldgotobottom=(Math.abs(scrollpos-scrollheight) < 5)
+        pre.textContent+=request.responseText.substring(1);
+        if (shouldgotobottom) {
+          pre.scrollTo(0,pre.scrollHeight);
+        }
+        setTimeout(function() {
+                                starttailing({url:url, pre:pre, button:button});
+                              }, 500);
+      } else if (request.status === 416) {
+        /* log was truncated, find the end of the currently
+           displayed log in the new remote log to determine
+           the offset at which we should now read. */
+        log('reloading truncated log: ' + tailpos);
+        var newreq = new XMLHttpRequest();
+        newreq.open('GET', cachebustingurl(url));
+        newreq.onreadystatechange = function () {
+          if (newreq.readyState === 4) {
+            if (newreq.status === 200) {
+              var len=pre.textContent.length;
+              var lastshown=pre.textContent.substring(len-200,len);
+              var newpos=newreq.responseText.indexOf(lastshown);
+              if (newpos > 0) {
+                pre.tailcorrection=-(len-(newpos+200));
+                starttailing({url:url, pre:pre, button:button});
+                return;
+              }
+            }
+            log('could not read file "' + url + '", status: ' + request.status);
+            pre.textContent="Attempting refresh..."
+            pre.tailcorrection=0;
+            readfile({url:url, pre:pre.id, button:button, tail:true});
+          }
+        }
+        newreq.send();
+      } else {
+        log('unexpected status: ' + request.status);
+      }
+    }
+  }
+  request.send();
+}
+
+function readfile({url, callback, callbackarg, pre, tail, button}) {
+  var request = new XMLHttpRequest();
+  request.open('GET', cachebustingurl(url));
+  request.onreadystatechange = function () {
+    if (request.readyState === 4 && request.status === 200) {
+      var type = request.getResponseHeader('Content-Type');
+      if (type.indexOf("text") !== 1) {
+        if (callback != null) {
+          callback(request.responseText, callbackarg);
+        }
+        if (pre != null) {
+          var preobj = document.getElementById(pre);
+          preobj.textContent=request.responseText;
+          if (tail === true) {
+            preobj.scrollTo(0,preobj.scrollHeight);
+            starttailing({url:url, pre:preobj, button:button});
+          }
+        }
+        if (button != null) {
+          var btn = document.getElementById(button);
+          btn.disabled=false;
+        }
+      }
+    }
+  }
+  request.send();
+}
+
+function callcgi(url) {
+  var request = new XMLHttpRequest();
+  request.open('GET', cachebustingurl(url));
+  request.onreadystatechange = function () {
+    if (request.readyState === 4 && request.status === 200) {
+      var type = request.getResponseHeader('Content-Type');
+      if (type.indexOf("text") !== 1) {
+        return request.responseText;
+      }
+    }
+  }
+  request.send();
+}
+
+function syncfunc() {
+  callcgi('cgi-bin/trigger_sync.sh');
+  var msg=document.getElementById('synctext');
+  msg.textContent="Sync triggered";
+  setTimeout(function() { msg.textContent=""; }, 5000);
+}
+
+function setbuttonsdisabled(group, disabled) {
+  var buttons=document.getElementsByClassName(group);
+  for (btn of buttons) {
+    btn.disabled=disabled;
+  }
+}
+
+function restorerebootbutton(button) {
+  button.disabled=false;
+  button.textContent='Restart Raspberry Pi';
+  button.onclick=function() { rebootfunc(button); };
+}
+
+function waitforreboot(button) {
+  log('waitforreboot');
+  var request = new XMLHttpRequest();
+  request.open('GET', cachebustingurl("index.html"));
+  request.setRequestHeader("Cache-Control", "no-cache, no-store, max-age=0");
+  request.onreadystatechange = function () {
+    log('readstatechange, state: ' + request.readyState + ', status: ' + request.status);
+    if (request.readyState === 4) {
+      if (request.status === 200) {
+        restorerebootbutton(button);
+        var msg=document.getElementById('reboottext');
+        msg.textContent='';
+        initialize();
+        return;
+      }
+      log("waiting for rpi");
+      window.setTimeout(function() { waitforreboot(button); }, 1000);
+    }
+  }
+  request.send();
+}
+
+var rebootbuttonresetter;
+function realrebootfunc(button) {
+  clearTimeout(rebootbuttonresetter);
+  setbuttonsdisabled('group1', true);
+  setbuttonsdisabled('group2', true);
+  callcgi('cgi-bin/reboot.sh');
+  var msg=document.getElementById('reboottext');
+  msg.textContent="Reboot is in progress";
+  button.disabled=true;
+  setTimeout(function() { waitforreboot(button); }, 5000);
+}
+
+function rebootfunc (button) {
+  button.textContent="Press again to confirm reboot";
+  button.onclick=function() { realrebootfunc(button); }
+  rebootbuttonresetter=setTimeout(function() { restorerebootbutton(button); }, 10000);
+}
+
+function refreshdiagnostics() {
+  var btn1=document.getElementById('diagrefreshbtn');
+  var btn2=document.getElementById('diagdwnbtn');
+  var pre=document.getElementById('diagnosticspre');
+  btn1.disabled=true;
+  btn2.disabled=true;
+  pre.textContent='Generating diagnostics...';
+
+  readfile({url:'cgi-bin/diagnose.sh', callback:function(value) {
+    readfile({pre:'diagnosticspre', url:'diagnostics.txt', button:'diagdwnbtn'});
+    var btn=document.getElementById('diagrefreshbtn');
+    btn.disabled=false;
+  }});
+}
+
+function initialize() {
+  setbuttonsdisabled('group1', true);
+  setbuttonsdisabled('group2', false);
+  readfile({pre:'archivelooppre', url:'archiveloop.log', tail:true, button:'aldwnbtn'});
+  readfile({pre:'setuplogpre', url:'teslausb-headless-setup.log', tail:true, button:'sudwnbtn'});
+  refreshdiagnostics();
+}
+
+function inIframe () {
+  try {
+    return window.self !== window.top;
+  } catch (e) {
+    return true;
+  }
+}
+
+if (inIframe()) {
+  document.location.replace('TeslaCam/');
+  /* prevent further execution in this iframe and just let it reload*/
+  nonExistentFunction();
+}
+
+function timeString(time_ms) {
+  var seconds = parseInt(time_ms / 1000);
+  var hours = parseInt(seconds / 3600);
+  var minutes = parseInt((seconds % 3600) / 60);
+  var seconds = seconds % 60;
+  var output = "";
+  if (hours != 0) {
+    output = hours + ":";
+  }
+  output = output + minutes.toString().padStart(2, "0") + ":";
+  output = output + seconds.toString().padStart(2, "0");
+  return output;
+}
+
+function showCurrentTime(time) {
+  var elem = document.getElementById('currenttime');
+  elem.innerText = timeString(time);
+}
+
+function showCurrentSegment(segmentname) {
+  var elem = document.getElementById('segmentname');
+  elem.innerText = prettyname(segmentname);
+}
+
+/* a collection of videos that share the same timestamp */
+class VideoSegment {
+  group;
+  sequence;
+  front;
+  left;
+  right;
+  back;
+  unknown;
+  numangles;
+  activevideoelems = [];
+  longestvideoelem;
+  readytoplay;
+  autoplay;
+  autoseek;
+
+  constructor(group, sequence) {
+    this.group = group; // RecentClips, SavedClips or SentryClips
+    this.sequence = sequence;
+    this.numangles = 0;
+    this.onDurationChange = this.onDurationChange.bind(this);
+    this.onTimeUpdate = this.onTimeUpdate.bind(this);
+    this.onVideoEnded = this.onVideoEnded.bind(this);
+    this.onVideoError = this.onVideoError.bind(this);
+    this.onDblClickVideo = this.onDblClickVideo.bind(this);
+    this.initdefaults();
+  }
+
+  initdefaults() {
+    this.activevideoelems = [];
+    this.longestvideoelem = undefined;
+    this.autoplay = false;
+    this.autoseek = -1;
+    this.readytoplay = false;
+  }
+
+  addVideo(path) {
+    if (path.includes('front')) {
+      this.front=path;
+      this.numangles++;
+    } else if (path.includes('left')) {
+      this.left=path;
+      this.numangles++;
+    } else if (path.includes('right')) {
+      this.right=path;
+      this.numangles++;
+    } else if (path.includes('back')) {
+      this.back=path;
+      this.numangles++;
+    }
+  }
+
+  onDblClickVideo(event) {
+    log(event);
+    event.target.requestFullscreen();
+  }
+
+  onDurationChange(event) {
+    var elem = event.target;
+    this.activevideoelems = this.activevideoelems.concat(elem);
+    log(this.activevideoelems.length + "/" + this.numangles + " duration: " + elem.duration);
+    if (this.longestvideoelem == undefined || elem.duration > this.longestvideoelem.duration) {
+      this.longestvideoelem = elem;
+    }
+    if (this.activevideoelems.length == this.numangles) {
+      log("all videos loaded. Longest: " + this.longestvideoelem.id + ": " + this.longestvideoelem.duration);
+      this.readytoplay = true;
+      this.longestvideoelem.ontimeupdate = this.onTimeUpdate;
+      for (var vid of this.activevideoelems) {
+        vid.onended=this.onVideoEnded;
+        vid.onerror=this.onVideoError;
+      }
+      if (this.autoseek) {
+        this.seekTo(this.autoseek);
+        this.autoseek = -1;
+      }
+      unfreezeVideoElems();
+      if (this.autoplay) {
+        log("autoplay was set");
+        this.autoplay = false;
+        this.play();
+      } else {
+        log("no autoplay");
+      }
+    }
+  }
+
+  onTimeUpdate(event) {
+    var elem = event.target;
+    var slider=document.getElementById('position');
+    // assume all segments are 60 seconds long, but correct for any shortfall
+    slider.value=(60000 - (this.longestvideoelem.duration*1000)) + (currentsequence.currentSegmentIdx() * 60000) + (elem.currentTime * 1000);
+    log("time: " + elem.currentTime);
+
+    showCurrentTime(slider.value);
+
+    showDebugInfo();
+
+    if (currentsequence.isPlaying()) {
+      for (var vid of this.activevideoelems) {
+        if (vid != elem && vid.paused && !vid.ended && elem.currentTime > (elem.duration - vid.duration)) {
+          log("starting vid");
+          vid.play();
+        }
+      }
+    } else {
+      log("not playing");
+    }
+  }
+
+  onVideoError(event) {
+    var elem = event.target;
+    log("error on '" + elem.id +"' at position " + elem.currentTime);
+    elem.errored = true;
+    this.onVideoEnded();
+  }
+
+  onVideoEnded() {
+    log("onvideoended");
+    for (var vid of this.activevideoelems) {
+      if (!vid.ended && !vid.errored) {
+        log("still playing");
+        return;
+      }
+    }
+    log("all ended");
+    // all videos ended
+    currentsequence.next();
+  }
+
+  select() {
+    var prefix = "TeslaCam/" + this.group + "/" + this.sequence + "/";
+    log("===== segment =====");
+    freezeVideoElems();
+    videoelems[0].src = prefix + this.left;
+    videoelems[1].src = prefix + this.front;
+    videoelems[2].src = prefix + this.right;
+    videoelems[3].src = prefix + this.back;
+
+    for (var i=0; i < 4;i++) {
+      var v = videoelems[i];
+      v.ontimeupdate = undefined;
+      v.onended = undefined;
+      v.onerror = undefined;
+      v.errored = false;
+      v.ondblclick = this.onDblClickVideo;
+      if (v.src != undefined) {
+        v.ondurationchange = this.onDurationChange;
+      }
+    }
+
+    for (var n of [this.left, this.right, this.front, this.back]) {
+      if (n != undefined) {
+        showCurrentSegment(n.substring(0, 19));
+        break;
+      }
+    }
+    var tt = document.getElementById('totaltime');
+    tt.innerText = " / " + timeString(currentsequence.length() * 60000);
+
+    this.initdefaults();
+  }
+
+  seekTo(position) {
+    if (this.readytoplay == true) {
+      log("segment seekTo " + position);
+      for (var vid of this.activevideoelems) {
+        // todo: account for differences in length
+        vid.currentTime=position;
+      }
+      return;
+    }
+    log("deferred seekTo " + position);
+    this.autoseek = position;
+  }
+
+  play() {
+    if (this.readytoplay == true) {
+      log("direct play");
+      this.longestvideoelem.play();
+      return;
+    }
+    log("deferred play");
+    this.autoplay = true;
+  }
+
+  pause() {
+    log("pause clearing autoplay");
+    this.autoplay = false;
+    for (var vid of this.activevideoelems) {
+      vid.pause();
+    }
+  }
+}
+
+var ro = new ResizeObserver(entries => {
+  log(entries);
+  for (var entry of entries) {
+    entry.target.resizeHandler();
+  }
+});
+
+var m = document.getElementById('sentrymap');
+m.resizeHandler = function() {
+  if (currentsequence != undefined) {
+    currentsequence.onMapResize();
+  }
+}
+ro.observe(m);
+var t = document.getElementById('tickmarkscanvas');
+t.resizeHandler = function () {
+  if (currentsequence != undefined) {
+    currentsequence.onTickResize();
+  }
+}
+ro.observe(t);
+
+/* a sequence of segments, e.g. a single sentry event, or a day's worth of RecentClips */
+class VideoSequence {
+  segments;
+  segmentsbytime;
+  sequencegroup; // RecentClips, SavedClips or SentryClips
+  sequencename;
+  currentsegmentidx;
+  isplaying;
+  jsonfile;
+  jsonparsed;
+
+  constructor(group, name) {
+    this.segments = [];
+    this.segmentsbytime = {};
+    this.sequencegroup = group;
+    this.sequencename = name;
+    this.reset();
+  }
+
+  reset() {
+    this.currentsegmentidx = -1;
+    this.isplaying = false;
+    var b = document.getElementById('playpause');
+    b.classList.remove("pause");
+    if (isFirefox) {
+      b.firstElementChild.firstChild.setAttribute('d', 'M 8,30 30,18 8,6 z');
+    }
+  }
+
+  getSegmentByName(timestamp) {
+    if (! this.segmentsbytime.hasOwnProperty(timestamp)) {
+      var segment = new VideoSegment(this.sequencegroup, this.sequencename);
+      this.segments = this.segments.concat(segment);
+      this.segmentsbytime[timestamp] = segment;
+    }
+    return this.segmentsbytime[timestamp];
+  }
+
+  getSegmentByIndex(index) {
+    return this.segments[index]
+  }
+
+  currentSegmentIdx() {
+    return this.currentsegmentidx;
+  }
+
+  length() {
+    return this.segments.length;
+  }
+
+  isPlaying() {
+    return this.isplaying == true;
+  }
+
+  select() {
+    this.reset();
+    currentsequence=this;
+    var name = document.getElementById('sequencename');
+    name.innerText = this.sequencegroup + " / " + prettyname(this.sequencename);
+    var slider = document.getElementById('position');
+    slider.max = (this.length() * 60000) - 1;
+    slider.oninput = this.onSeek.bind(this);
+    slider.onmousedown = this.onSeekStart.bind(this);
+    slider.onchange =  this.onSeekEnd.bind(this);
+    this.seekTo(0);
+    this.onMapResize();
+    this.onTickResize();
+    this.showSentryLocation();
+  }
+
+  onMapResize() {
+    log("onMapResize");
+    var m = document.getElementById('sentrymap');
+    log("map resized to " + m.clientWidth + "x" + m.clientHeight);
+    if (this.jsonparsed != undefined && this.jsonparsed.est_lat != undefined && this.jsonparsed.est_lon != undefined) {
+      var url = "https://www.bing.com/maps/embed?w=" + m.clientWidth + "&h=" + m.clientHeight +
+                "&cp=" + this.jsonparsed.est_lat + "~" + this.jsonparsed.est_lon + "&lvl=18&typ=d&sty=h&src=SHELL&FORM=MBEDV8";
+      log("url: " + url);
+      // For some reason resize events are reported even when the size
+      // didn't actually change, so don't set the url the same value
+      // it already has, since that forces a refresh.
+      if (m.src != url) {
+        m.src = url;
+      }
+      m.style.visibility = "inherit";
+      return;
+    }
+
+    m.style.visibility = "hidden";
+
+    this.readJsonIfNeeded();
+  }
+
+  readJsonIfNeeded() {
+    if (this.jsonparsed != undefined) {
+      // no need to parse json again
+      log("already parsed json");
+      return;
+    }
+
+    if (this.jsonfile === null) {
+      log("json fetch in progress");
+      return;
+    }
+
+    if (this.jsonfile === undefined) {
+      log("no json");
+      return;
+    }
+
+    var jsonurl = "TeslaCam/" + this.sequencegroup + "/" + this.sequencename + "/" + this.jsonfile;
+    // clear this so we only do this once
+    this.jsonfile = null;
+    log("starting json fetch");
+    readfile({url:jsonurl, callbackarg:this, callback:function(value, thiz) {
+	if (thiz != currentsequence) {
+          return;
+        }
+        log("json read callback");
+        log(value);
+        thiz.jsonparsed = JSON.parse(value);
+        log(thiz.jsonparsed);
+        thiz.onMapResize();
+        thiz.onTickResize();
+        thiz.showSentryLocation();
+    }});
+  }
+
+  drawTick(percent) {
+    var c = document.getElementById('tickmarkscanvas');
+    var t = c.getContext("2d");
+    var w = c.width - 15;
+    var h = c.height;
+    t.fillStyle = "#ffffff"
+    t.beginPath();
+    t.moveTo(7.5 + w * percent, 0);
+    t.lineTo(7.5 + w * percent + h / 2, h);
+    t.lineTo(7.5 + w * percent - h / 2, h);
+    t.fill();
+  }
+
+  onTickResize() {
+    log("onTickResize");
+    var c = document.getElementById('tickmarkscanvas');
+    log("tickmarks resized to " + c.clientWidth + "x" + c.clientHeight);
+    c.width = c.clientWidth;
+    c.height = c.clientHeight;
+    /* TODO: draw tickmarks at Sentry event times */
+    if (this.jsonparsed != undefined && this.jsonparsed.timestamp != undefined) {
+      var eventTimeMs = Date.parse(this.jsonparsed.timestamp);
+      var eventSegmentStartMs;
+      var segmentIdx;
+      for (segmentIdx = this.length() - 1; segmentIdx >= 0; segmentIdx--) {
+        var segment = this.getSegmentByIndex(segmentIdx);
+        var s = segment.front;
+        eventSegmentStartMs = Date.parse(
+		s.substring(0,10) + "T" + s.substring(11,13) + ":" + s.substring(14,16) + ":" + s.substring(17, 19));
+        if (eventSegmentStartMs <= eventTimeMs) {
+          break;
+        }
+      }
+      var offsetIntoSegment = eventTimeMs - eventSegmentStartMs;
+      var eventOffsetMs = (segmentIdx * 60 * 1000) + offsetIntoSegment;
+      var sequenceLengthMs = this.length() * 60 * 1000;
+      this.drawTick(eventOffsetMs / sequenceLengthMs);
+      log(eventOffsetMs / sequenceLengthMs);
+      return;
+    }
+    this.readJsonIfNeeded();
+  }
+
+  showSentryLocation() {
+    var d = document.getElementById("sequencelocation");
+    if (this.jsonparsed != undefined && this.jsonparsed.city != undefined) {
+      d.innerText = this.jsonparsed.city;
+    } else {
+      d.innerText = "";
+    }
+  }
+
+  onSeekStart(event) {
+    log("seek start");
+  }
+
+  onSeek(event) {
+    this.seekTo(event.target.value);
+  }
+
+  onSeekEnd(event) {
+    log("seek end");
+  }
+
+  seekTo(seektime) {
+    if (seektime < 0) {
+      seektime = 0;
+    }
+    // assume each segment is exactly 1 minute long
+    var slider=document.getElementById('position');
+    if (seektime > parseInt(slider.max)) {
+      log("seeking past max");
+      seektime = slider.max;
+    }
+    slider.value=seektime;
+    showCurrentTime(seektime);
+    var index = parseInt(seektime / 60000);
+    var segment = this.getSegmentByIndex(index);
+    if (index != this.currentsegmentidx) {
+      log("pausing current segment");
+      var oldsegment = this.getSegmentByIndex(this.currentsegmentidx);
+      if (oldsegment != undefined) {
+        oldsegment.pause();
+      }
+      log("selecting new segment " + index);
+      segment.select();
+      if (this.isplaying) {
+        log("playing new segment");
+        segment.play();
+      }
+      this.currentsegmentidx=index;
+    }
+    segment.seekTo((seektime % 60000) / 1000);
+  }
+
+  next() {
+    var nextsegment = this.currentsegmentidx + 1;
+    log("next: " + this.currentsegmentidx);
+    if (nextsegment >= this.length()) {
+      return false;
+    }
+    this.seekTo(nextsegment * 60000);
+    return true;
+  }
+
+  toggleplaypause() {
+    if (this.isplaying) {
+      this.pause();
+    } else {
+      this.play();
+    }
+  }
+
+  play() {
+    log("play: " + this.currentsegmentidx);
+    this.isplaying = true;
+    var segment = this.getSegmentByIndex(this.currentsegmentidx);
+    segment.play();
+    var b = document.getElementById('playpause');
+    b.classList.add("pause");
+    if (isFirefox) {
+      b.firstElementChild.firstChild.setAttribute('d', 'M 8,30 14,30 14,6 8,6 z M 24,30 30,30 30,6 24,6 z');
+    }
+  }
+
+  pause() {
+    this.isplaying = false;
+    var segment = this.getSegmentByIndex(this.currentsegmentidx);
+    segment.pause();
+    var b = document.getElementById('playpause');
+    b.classList.remove("pause");
+    if (isFirefox) {
+      b.firstElementChild.firstChild.setAttribute('d', 'M 8,30 30,18 8,6 z');
+    }
+  }
+}
+
+var videos={};
+var currentsequence;
+
+var videoelems = [
+  document.getElementById('leftview'),
+  document.getElementById('frontview'),
+  document.getElementById('rightview'),
+  document.getElementById('backview')
+];
+
+var canvaselems = [
+  document.getElementById('leftviewfreeze'),
+  document.getElementById('frontviewfreeze'),
+  document.getElementById('rightviewfreeze'),
+  document.getElementById('backviewfreeze')
+];
+
+function freezeVideoElems() {
+  for (var i=0; i < 4;i++) {
+    var v = videoelems[i];
+    var c = canvaselems[i];
+    c.width = v.clientWidth;
+    c.height = v.clientHeight;
+    var ctx = c.getContext("2d");
+    if (v.classList.contains("flipped")) {
+      ctx.scale(-1, 1);
+      ctx.drawImage(v, 0, 0, -c.width, c.height);
+    } else {
+      ctx.drawImage(v, 0, 0, c.width, c.height);
+    }
+    v.style.visibility="hidden";
+  }
+}
+
+function unfreezeVideoElems() {
+  for (var i=0; i < 4;i++) {
+    var v = videoelems[i];
+    v.style.visibility="inherit";
+  }
+
+}
+
+function prettyname(name) {
+  if (name.length == 10) {
+    return name;
+  }
+
+  var d = name.substr(0,10);
+  var t = name.substr(11,8);
+
+  return d + " / " + t.replaceAll("-", ":");
+}
+
+readfile({url:'cgi-bin/videolist.sh', callback:function(value) {
+  var newest="0-";
+  var newestsequence;
+  var lines = value.split('\n');
+  for (line of lines) {
+    var [group, sequencename, filename] = line.split('/');
+    if (sequencename == undefined) {
+      continue;
+    }
+    if (filename.includes("~")) {
+       /* skip fsck recovered files for now */
+       continue;
+    }
+    if (sequencename.includes("json")) {
+       /* this shouldn't be necessary, and can be removed once
+          teslausb no longer creates an "event.json" folder */
+       continue;
+    }
+    if (!videos.hasOwnProperty(group)) {
+      videos[group]={};
+    }
+    var sequence;
+    if (videos[group].hasOwnProperty(sequencename)) {
+      sequence=videos[group][sequencename];
+    } else {
+      sequence=new VideoSequence(group, sequencename);
+      videos[group][sequencename]=sequence;
+    }
+    if (filename.includes(".mp4")) {
+      videotime=filename.substring(0, 19);
+      segment=sequence.getSegmentByName(videotime);
+      segment.addVideo(filename);
+      if (sequencename > newest) {
+        newest = sequencename;
+        newestsequence=sequence;
+      }
+    } else if (filename.includes("thumb")) {
+      sequence.thumb=filename;
+    } else if (filename.includes("json")) {
+      sequence.jsonfile=filename;
+    }
+  }
+  newestsequence.select();
+
+  for (i of ["RecentClips", "SavedClips", "SentryClips"]) {
+    var d=document.getElementById(i);
+    for (c in videos[i]) {
+      if (videos[i][c].getSegmentByIndex(0) == undefined) {
+        log("skipping empty " + i + "/" + c);
+        continue;
+      }
+      var newelem = document.createElement("a");
+      newelem.innerHTML = prettyname(c.toString());
+      newelem.group=i;
+      newelem.sequence=videos[i][c];
+      if (newelem.sequence == newestsequence) {
+        newelem.className='selecteddropdownitem';
+      } else {
+        newelem.className='dropdownitem';
+      }
+      newelem.onclick=function() {
+        log(this.sequence);
+        var previousselected = document.getElementsByClassName('selecteddropdownitem');
+        for (item of previousselected) {
+          item.className='dropdownitem';
+        }
+        this.className='selecteddropdownitem'
+        this.parentElement.style.display="none";
+        /* There's probably a better way, but I couldn't figure it out.
+           This hides the menu dropdown when clicked, then re-enables
+           once the mouse has moved so it doesn't stay hidden forever */
+        document.onmousemove=function(self) {
+                return function() {
+                        self.parentElement.style.display="";
+                        document.onmousemove=undefined;};
+                }(this);
+        this.sequence.select();
+      };
+      d.appendChild(newelem);
+    }
+  }
+}
+});
+
+initialize();
+
+</script>
+</body>
+</html>

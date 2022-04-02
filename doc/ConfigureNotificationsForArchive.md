@@ -1,4 +1,4 @@
-OPTIONAL: You can choose to integrate with [Pushover](https://pushover.net), [Gotify](https://gotify.net/), [IFTTT](https://ifttt.com), [Telegram](https://telegram.org) and/or [AWS SNS](https://aws.amazon.com/sns/) to get a push/email notification to your phone when the copy process is done. Depending on your wireless network speed/connection, copying files may take some time, so a push notification can help confirm that the process finished. If no files were copied (i.e. all manually saved dashcam files were already copied, no notification will be sent.).
+OPTIONAL: You can choose to integrate with [Pushover](https://pushover.net), [Gotify](https://gotify.net/), [IFTTT](https://ifttt.com), [Telegram](https://telegram.org), [AWS SNS](https://aws.amazon.com/sns/), and/or [Discord](https://discord.com/) to get a push/email notification to your phone when the copy process is done. Depending on your wireless network speed/connection, copying files may take some time, so a push notification can help confirm that the process finished. If no files were copied (i.e. all manually saved dashcam files were already copied, no notification will be sent.).
 
 # Pushover
 The Pushover service is free for up to 7,500 messages per month, but the [iOS](https://pushover.net/clients/ios)/[Android](https://pushover.net/clients/android) apps do have a one time cost, after a free trial period. *This also assumes your Pi is connected to a network with internet access.*
@@ -9,9 +9,9 @@ The Pushover service is free for up to 7,500 messages per month, but the [iOS](h
 1. Copy the **Application Key** for the application you just created. The User key + Application Key are basically a username/password combination to needed to send the push.
 1. Run these commands, substituting your user key and app key in the appropriate places. No `"` are needed.
     ```
-    export pushover_enabled=true
-    export pushover_user_key=put_your_userkey_here
-    export pushover_app_key=put_your_appkey_here
+    export PUSHOVER_ENABLED=true
+    export PUSHOVER_USER_KEY=put_your_userkey_here
+    export PUSHOVER_APP_KEY=put_your_appkey_here
     ```
 
 # Gotify
@@ -22,10 +22,10 @@ Gotify is a self-hosted notification service. The android client is available on
 1. Copy the app's token
 1. Run these commands, substituting your domain and app token in the appropriate places.
     ```
-    export gotify_enabled=true
-    export gotify_domain=https://gotify.domain.com
-    export gotify_app_token=put_your_token_here
-    export gotify_priority=5
+    export GOTIFY_ENABLED=true
+    export GOTIFY_DOMAIN=https://gotify.domain.com
+    export GOTIFY_APP_TOKEN=put_your_token_here
+    export GOTIFY_PRIORITY=5
     ```
 
 # IFTTT
@@ -52,9 +52,9 @@ IFTTT is a completely free alternative that can be configured to send notificati
 1. You should receive a notification within a few seconds. :)
 1. Run these commands, substituting your event name and key in the appropriate places.
     ```
-    export ifttt_enabled=true
-    export ifttt_event_name=put_your_event_name_here
-    export ifttt_key=put_your_key_here
+    export IFTTT_ENABLED=true
+    export IFTTT_EVENT_NAME=put_your_event_name_here
+    export IFTTT_KEY=put_your_key_here
     ```
 
 # AWS SNS
@@ -64,13 +64,13 @@ You can also choose to send notification through AWS SNS. You can create a free 
 1. Create a user in IAM and give it the rights to SNS.
 1. Create a new SNS topic.
 1. Create the notification end point (email or other)
-1. Run these commands, substituting your user key and app key in the appropriate places. Use of `"` is required for aws_sns_topic_arn.
+1. Run these commands, substituting your user key and app key in the appropriate places. Use of `"` is required for AWS_SNS_TOPIC_ARN.
     ```
-    export sns_enabled=true
-    export aws_region=us-east-1
-    export aws_access_key_id=put_your_accesskeyid_here
-    export aws_secret_key=put_your_secretkey_here
-    export aws_sns_topic_arn=put_your_sns_topicarn_here
+    export SNS_ENABLED=true
+    export AWS_REGION=us-east-1
+    export AWS_ACCESS_KEY_ID=put_your_accesskeyid_here
+    export AWS_SECRET_ACCESS_KEY=put_your_secretkey_here
+    export AWS_SNS_TOPIC_ARN=put_your_sns_topicarn_here
     ```
 
 # Webhook
@@ -98,3 +98,49 @@ You can choose to send notifications via [Telegram](https://telegram.org/). This
     export TELEGRAM_BOT_TOKEN=bot123456789:abcdefghijklmnopqrstuvqxyz987654321
     export TELEGRAM_SILENT_NOTIFY=false
     ```
+
+# Matrix
+Matrix is a federated messaging protocol that can be used via [Matrix.org](https://matrix.org) or self hosted homeservers. Matrix can be used via a web browser or one of the [many available clients](https://matrix.org/clients/).
+
+1. Create an account for your bot either on [matrix.org](https://matrix.org) or your own homeserver
+2. Create a room where you want to send the notifications to, either as the bot user or invite and join the bot user to the room
+3. Navigate to the room settings to discover the "Internal room ID"
+4. Remove the comments and update the following values in the ```teslausb_setup_variables.conf``` file with the gathered information. Use of `'` is required for MATRIX_PASSWORD and MATRIX_ROOM:
+
+    ```
+    export MATRIX_ENABLED=true
+    export MATRIX_SERVER_URL=https://matrix.org
+    export MATRIX_USERNAME=put_your_matrix_username_here
+    export MATRIX_PASSWORD='put_your_matrix_password_here'
+    export MATRIX_ROOM='put_the_matrix_target_room_id_here'
+    ```
+
+# Slack
+Notifications can be sent via webhook to channels or DM in Slack.
+
+1. Go to https://api.slack.com and click "Create a custom app"
+2. Enter an Application name and select a workspace that you want this application added to
+3. Under "Add features and functionality" select "Incoming Webhooks"
+4. Toggle Webhooks on and select "Add Webhook to Workspace". Copy this URL for the webhook url in step 5
+5. Remove the comments and update the following values in the ```teslausb_setup_variables.conf``` file with the gathered information.
+    
+    ```
+    export SLACK_ENABLED=true
+    export SLACK_WEBHOOK_URL=http://localhost
+    ```
+
+# Discord
+Discord is a voice, video, and text communication service that can be configured to send notifications. It requires a free server or adequate permissions to configure a webhook integration on an existing server.
+
+1. Open Discord and click the name of the server or the cog next to the channel in which you'd like the notifications to appear.
+2. Click Integrations > Webhooks > New Webhook
+3. Give your webhook a name and choose the channel you'd like the notifications to appear in
+4. Click Copy Webhook URL
+5. Remove the comments and update the following values in the `teslausb_setup_variables.conf` file
+
+   ```
+   export DISCORD_ENABLED=true
+   export DISCORD_WEBHOOK_URL=put_your_webhook_url_here
+   ```
+
+Replace the entire URL string with your URL from Step 4

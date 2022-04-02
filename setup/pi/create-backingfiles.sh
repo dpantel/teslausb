@@ -4,6 +4,7 @@ function log_progress () {
   if declare -F setup_progress > /dev/null
   then
     setup_progress "create-backingfiles: $1"
+    return
   fi
   echo "create-backingfiles: $1"
 }
@@ -14,10 +15,9 @@ CAM_SIZE="$1"
 MUSIC_SIZE="$2"
 # strip trailing slash that shell autocomplete might have added
 BACKINGFILES_MOUNTPOINT="${3/%\//}"
+USE_EXFAT="$4"
 
-log_progress "cam: $CAM_SIZE, music: $MUSIC_SIZE, mountpoint: $BACKINGFILES_MOUNTPOINT"
-
-G_MASS_STORAGE_CONF_FILE_NAME=/etc/modprobe.d/g_mass_storage.conf
+log_progress "cam: $CAM_SIZE, music: $MUSIC_SIZE, mountpoint: $BACKINGFILES_MOUNTPOINT, exfat: $USE_EXFAT"
 
 function first_partition_offset () {
   local filename="$1"
@@ -46,11 +46,9 @@ function is_percent() {
 
 available_space () {
   freespace=$(df --output=avail --block-size=1K "$BACKINGFILES_MOUNTPOINT/" | tail -n 1)
-  # leave 6 GB of free space for filesystem bookkeeping and snapshotting
-  # (in kilobytes so 6M KB)
-  # TODO: investigate whether this value can be smaller in general, or
-  # when SMB access is not enabled.
-  padding=$(dehumanize "6M")
+  # leave 10 GB of free space for filesystem bookkeeping and snapshotting
+  # (in kilobytes so 10M KB)
+  padding=$(dehumanize "10M")
   echo $((freespace-padding))
 }
 
@@ -82,18 +80,28 @@ function add_drive () {
   local label="$2"
   local size="$3"
   local filename="$4"
+  local useexfat="$5"
 
   log_progress "Allocating ${size}K for $filename..."
   fallocate -l "$size"K "$filename"
-  echo "type=c" | sfdisk "$filename" > /dev/null
+  if [ "$useexfat" = true  ]
+  then
+    echo "type=7" | sfdisk "$filename" > /dev/null
+  else
+    echo "type=c" | sfdisk "$filename" > /dev/null
+  fi
 
   local partition_offset
   partition_offset=$(first_partition_offset "$filename")
 
-  losetup -o "$partition_offset" -f "$filename"
-  loopdev=$(losetup -j "$filename" | awk '{print $1}' | sed 's/://')
+  loopdev=$(losetup -o "$partition_offset" -f --show "$filename")
   log_progress "Creating filesystem with label '$label'"
-  mkfs.vfat "$loopdev" -F 32 -n "$label"
+  if [ "$useexfat" = true  ]
+  then
+    mkfs.exfat "$loopdev" -L "$label"
+  else
+    mkfs.vfat "$loopdev" -F 32 -n "$label"
+  fi
   losetup -d "$loopdev"
 
   local mountpoint=/mnt/"$name"
@@ -102,22 +110,21 @@ function add_drive () {
   then
     mkdir "$mountpoint"
   fi
-  sed -i "\@^$filename .*@d" /etc/fstab
-  echo "$filename $mountpoint vfat utf8,noauto,users,umask=000,offset=$partition_offset 0 0" >> /etc/fstab
-  log_progress "updated /etc/fstab for $mountpoint"
 }
 
-function create_default_entries () {
-  mount /mnt/cam
-  mkdir /mnt/cam/TeslaCam
-  mkdir /mnt/cam/TeslaTrackMode
-  touch /mnt/cam/.metadata_never_index
-  umount /mnt/cam
-  if [ -e /mnt/music ]
+function check_for_exfat_support () {
+  # First check for built-in ExFAT support
+  # If that fails, check for an ExFAT module
+  # in this last case exfat doesn't appear
+  # in /proc/filesystems if the module is not loaded.
+  if grep -q exfat /proc/filesystems &> /dev/null
   then
-    mount /mnt/music
-    touch /mnt/music/.metadata_never_index
-    umount /mnt/music
+    return 0;
+  elif modprobe -n exfat &> /dev/null
+  then
+    return 0;
+  else 
+    return 1;  
   fi
 }
 
@@ -139,7 +146,7 @@ then
   esac
 fi
 killall archiveloop || true
-modprobe -r g_mass_storage
+/root/bin/disable_gadget.sh
 umount -d /mnt/cam || true
 umount -d /mnt/music || true
 umount -d /backingfiles/snapshots/snap*/mnt || true
@@ -147,10 +154,27 @@ rm -f "$CAM_DISK_FILE_NAME"
 rm -f "$MUSIC_DISK_FILE_NAME"
 rm -rf "$BACKINGFILES_MOUNTPOINT/snapshots"
 
+# Check if kernel supports ExFAT 
+if ! check_for_exfat_support
+then
+  if [ "$USE_EXFAT" = true  ]
+  then
+    log_progress "kernel does not support ExFAT FS. Reverting to FAT32."
+    USE_EXFAT=false
+  fi
+else
+  # install exfatprogs if needed
+  if ! hash mkfs.exfat &> /dev/null
+  then
+    /root/bin/remountfs_rw
+    apt install -y exfatprogs
+  fi
+fi
+
 CAM_DISK_SIZE="$(calc_size "$CAM_SIZE")"
 MUSIC_DISK_SIZE="$(calc_size "$MUSIC_SIZE")"
 
-add_drive "cam" "CAM" "$CAM_DISK_SIZE" "$CAM_DISK_FILE_NAME"
+add_drive "cam" "CAM" "$CAM_DISK_SIZE" "$CAM_DISK_FILE_NAME" "$USE_EXFAT"
 log_progress "created camera backing file"
 
 REMAINING_SPACE="$(available_space)"
@@ -165,12 +189,8 @@ fi
 
 if [ "$REMAINING_SPACE" -ge 1024 ] && [ "$MUSIC_DISK_SIZE" -gt 0 ]
 then
-  add_drive "music" "MUSIC" "$MUSIC_DISK_SIZE" "$MUSIC_DISK_FILE_NAME"
+  add_drive "music" "MUSIC" "$MUSIC_DISK_SIZE" "$MUSIC_DISK_FILE_NAME" "$USE_EXFAT"
   log_progress "created music backing file"
-  echo "options g_mass_storage file=$MUSIC_DISK_FILE_NAME,$CAM_DISK_FILE_NAME removable=1,1 ro=0,0 stall=0 iSerialNumber=123456" > "$G_MASS_STORAGE_CONF_FILE_NAME"
-else
-  echo "options g_mass_storage file=$CAM_DISK_FILE_NAME removable=1 ro=0 stall=0 iSerialNumber=123456" > "$G_MASS_STORAGE_CONF_FILE_NAME"
 fi
 
-create_default_entries
 log_progress "done"

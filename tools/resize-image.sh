@@ -58,13 +58,13 @@ then
 fi
 
 # remove device from any attached host
-modprobe -r g_mass_storage
+/root/bin/disable_gadget.sh
 
-# fsck the image, since we may have just yanked it out from under the host
-losetup -P -f "$FILE"
-DEVLOOP=$(losetup -j "$FILE" | awk '{print $1}' | sed 's/://')
+# fsck the image, since we may have just yanked it out from under the host.
+# Use -p repair arg. It works with vfat and exfat.
+DEVLOOP=$(losetup --show -P -f "$FILE")
 PARTLOOP=${DEVLOOP}p1
-fsck "$PARTLOOP" -- -a > /dev/null || true
+fsck "$PARTLOOP" -- -p > /dev/null || true
 
 # get size of the image file and the partition within
 CURRENT_PARTITION_SIZE=$(($(partx -o SECTORS -g -n 1 "$FILE") * 512 + 512))

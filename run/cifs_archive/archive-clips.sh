@@ -3,8 +3,7 @@
 function connectionmonitor {
   while true
   do
-    # shellcheck disable=SC2034
-    for i in {1..5}
+    for _ in {1..5}
     do
       if timeout 6 /root/bin/archive-is-reachable.sh "$ARCHIVE_SERVER"
       then
@@ -14,79 +13,41 @@ function connectionmonitor {
       fi
     done
     log "connection dead, killing archive-clips"
-    # The archive loop might be stuck on an unresponsive server, so kill it hard.
-    # (should be no worse than losing power in the middle of an operation)
-    kill -9 "$1"
+    # Since there can be a substantial delay before rsync deletes archived
+    # source files, give it an opportunity to delete them before killing it
+    # hard.
+    killall rsync || true
+    sleep 2
+    killall -9 rsync || true
+    kill -9 "$1" || true
     return
   done
 }
 
-function moveclips() {
-  cd "$1"
-
-  while IFS= read -r srcfile
-  do
-    # Remove the 'TeslaCam' folder
-    destfile="$srcfile"
-    destdir="$ARCHIVE_MOUNT"/$(dirname "$destfile")
-
-    if [ -f "$srcfile" ]
-    then
-      log "Moving '$srcfile'"
-      if [ ! -e "$destdir" ]
-      then
-        log "Creating output directory '$destdir'"
-        if ! mkdir -p "$destdir"
-        then
-          log "Failed to create '$destdir', check that archive server is writable and has free space"
-          return 1
-        fi
-      fi
-
-      if mv -f "$srcfile" "$destdir"
-      then
-        log "Moved '$srcfile'"
-      else
-        log "Failed to move '$srcfile'"
-        return 1
-      fi
-    else
-      log "$srcfile not found"
-    fi
-  done < "$2"
-}
-
 connectionmonitor $$ &
+
+# rsync's temp files may be left behind if the connection is lost,
+# but rsync doesn't clean these up on subsequent runs. Putting
+# them in a temp dir allows them to be easily cleaned up.
+rsynctmp=".teslausbtmp"
+rm -rf "$ARCHIVE_MOUNT/${rsynctmp:?}" || true
+mkdir -p "$ARCHIVE_MOUNT/$rsynctmp"
+
+rm -f /tmp/archive-rsync-cmd.log /tmp/archive-error.log
 
 while [ -n "${1+x}" ]
 do
-  moveclips "$1" "$2"
+  if ! (rsync -avhRL --remove-source-files --temp-dir="$rsynctmp" --no-perms --omit-dir-times --stats \
+        --log-file=/tmp/archive-rsync-cmd.log --ignore-missing-args \
+        --files-from="$2" "$1/" "$ARCHIVE_MOUNT" &> /tmp/rsynclog || [[ "$?" = "24" ]] )
+  then
+    cat /tmp/archive-rsync-cmd.log /tmp/rsynclog > /tmp/archive-error.log
+    exit 1
+  fi
+
   shift 2
 done
 
-# Create trigger file for SavedClips
-# shellcheck disable=SC2154
-if [ -n "${trigger_file_saved+x}" ]
-then
-  log "Creating SavedClips Trigger File: $ARCHIVE_MOUNT/SavedClips/${trigger_file_saved}"
-  touch "$ARCHIVE_MOUNT/SavedClips/${trigger_file_saved}"
-fi
+rm -rf "$ARCHIVE_MOUNT/${rsynctmp:?}" || true
 
-# Create trigger file for SentryClips
-# shellcheck disable=SC2154
-if [ -n "${trigger_file_sentry+x}" ]
-then
-  log "Creating SentryClips Trigger File: $ARCHIVE_MOUNT/SentryClips/${trigger_file_sentry}"
-  touch "$ARCHIVE_MOUNT/SentryClips/${trigger_file_sentry}"
-fi
-
-# Create trigger file for Archive Root
-# shellcheck disable=SC2154
-if [ -n "${trigger_file_any+x}" ]
-then
-  log "Creating Archive Root Trigger File: $ARCHIVE_MOUNT/${trigger_file_any}"
-  touch "$ARCHIVE_MOUNT/${trigger_file_any}"
-fi
-
-kill %1
-
+kill %1 || true

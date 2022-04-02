@@ -6,35 +6,45 @@ then
   return 1 # shouldn't use exit when sourced
 fi
 
+# Unload the module that was loaded by /boot/cmdline.txt
+modprobe -r g_ether
+
+export LOG_FILE=/mutable/archiveloop.log
+
+function log () {
+  echo -n "$( date ): " >> "$LOG_FILE"
+  echo "$@" >> "$LOG_FILE"
+}
+
+function log_errors_on_exit {
+  log "archiveloop exited with code $1. Recent errors follow"
+  journalctl -n 15 -u teslausb >> "$LOG_FILE"
+  log "end of errors."
+  exit "$1"
+}
+
 if [ "${FLOCKED:-}" != "$0" ]
 then
   if FLOCKED="$0" flock -en -E 99 "$0" "$0" "$@" || case "$?" in
   99) echo already running
       exit 99
       ;;
-  *)  exit $?
+  *)  log_errors_on_exit $?
       ;;
   esac
   then
     # success
-    exit 0
+    log_errors_on_exit 0
   fi
 fi
 
 # turning off hdmi saves a little bit of power
-/usr/bin/tvservice -o
-
-export LOG_FILE=/mutable/archiveloop.log
+/usr/bin/tvservice -o || log "failed to turn off hdmi"
 
 export CAM_MOUNT=/mnt/cam
 export MUSIC_MOUNT=/mnt/music
 export ARCHIVE_MOUNT=/mnt/archive
 export MUSIC_ARCHIVE_MOUNT=/mnt/musicarchive
-
-function log () {
-  echo -n "$( date ): " >> "$LOG_FILE"
-  echo "$1" >> "$LOG_FILE"
-}
 
 # when sourced, setup-teslausb sets the config variables in the environment
 source /root/bin/setup-teslausb
@@ -77,9 +87,9 @@ function timestamp () {
 function fix_errors_in_image () {
   local image="$1"
   log "Running fsck on $image..."
-  losetup -f -P "$image"
-  loopback=$(losetup -j "$image" | awk '{print $1}' | sed 's/://')
-  /sbin/fsck "${loopback}p1" -- -a |& timestamp '| ' >> "$LOG_FILE" || echo ""
+  loopback=$(losetup --show -f -P "$image")
+  # Use -p repair arg. It works with vfat and exfat.
+  /sbin/fsck "${loopback}p1" -- -p |& timestamp '| ' >> "$LOG_FILE" || echo ""
   losetup -d "$loopback"
   log "Finished fsck on $image."
 }
@@ -99,8 +109,9 @@ function archive_is_reachable () {
 
 function connect_usb_drives_to_host() {
   log "Connecting usb to host..."
-  modprobe g_mass_storage
+  /root/bin/enable_gadget.sh
   log "Connected usb to host."
+  sleep 5
 }
 
 function wait_for_archive_to_be_reachable () {
@@ -151,7 +162,7 @@ function mount_mountpoint () {
   log "Mounting $mount_point..."
 
   local mounted=true
-  mount "$mount_point" >> "$LOG_FILE" 2>&1 || mounted=false
+  timeout 10 mount "$mount_point" >> "$LOG_FILE" 2>&1 || mounted=false
   if [ "$mounted" = true ]
   then
     log "Mounted $mount_point."
@@ -239,23 +250,18 @@ function wait_for_archive_to_be_unreachable () {
 }
 
 function check_if_usb_gadget_is_mounted () {
-    local found="false"
-    for lun in /sys/devices/platform/soc/??980000.usb/gadget/lun0
-    do
-      if [ -d "$lun" ]
-      then
-        found="true"
-        break
-      fi
-    done
+  LUNFILE=/sys/kernel/config/usb_gadget/teslausb/configs/c.1/mass_storage.0/lun.0/file
+  if [ -n "$(cat /sys/kernel/config/usb_gadget/teslausb/UDC)" ] &&
+     [ -e "$LUNFILE" ] &&
+     [ "$(cat $LUNFILE)" = /backingfiles/cam_disk.bin ]
+  then
+    return
+  fi
 
-    if [ "$found" = "false" ]
-    then
-        log "USB Gadget not mounted. Fixing files and remounting..."
-        disconnect_usb_drives_from_host
-        fix_errors_in_images
-        connect_usb_drives_to_host
-    fi
+  log "USB Gadget not mounted. Fixing files and remounting..."
+  disconnect_usb_drives_from_host
+  fix_errors_in_images
+  connect_usb_drives_to_host
 }
 
 function trim_free_space() {
@@ -288,8 +294,9 @@ function fix_errors_in_images () {
 
 function disconnect_usb_drives_from_host () {
   log "Disconnecting usb from host..."
-  modprobe -r g_mass_storage
+  /root/bin/disable_gadget.sh
   log "Disconnected usb from host."
+  sleep 5
 }
 
 function convert_seconds_to_nice_time () {
@@ -306,6 +313,65 @@ function convert_seconds_to_nice_time () {
   else
     printf "%ds" $s
   fi
+}
+
+function filterfile {
+  if [ -x /root/bin/archive-filter ]
+  then
+    /root/bin/archive-filter "$1"
+  fi
+}
+
+function sortfile {
+  touch "$1"
+  sort "$1" > /tmp/sort_tmp.$$
+  mv /tmp/sort_tmp.$$ "$1"
+}
+
+function prunefile {
+  sortfile "$1"
+  sortfile "$2"
+  comm -2 -3 "$1" "$2" > /tmp/prune_tmp.$$
+  mv /tmp/prune_tmp.$$ "$1"
+}
+
+function intersect {
+  sortfile "$1"
+  sortfile "$2"
+  comm -1 -2 "$1" "$2" > /tmp/prune_tmp.$$
+  mv /tmp/prune_tmp.$$ "$1"
+}
+
+function clean_cam_mount {
+  log "cleaning cam mount"
+  # Delete the files that fsck "recovered". These are generally files
+  # that were deleted previously by the car or teslausb
+  find "${CAM_MOUNT}" \( \( -type f -name FSCK\*.REC \) -o \( -type d -name \*.M \) \) -print0 | xargs -0 rm -rf
+
+  # Remove files, oldest first, until there is at least 20GB of free space
+
+  (cd "${CAM_MOUNT}"; find . -type f -a \( -path './TeslaCam/*' -o -path './TeslaTrackMode/*' \) -printf '%P\0') > /tmp/rmcandidates.txt
+  if [ -s /tmp/rmcandidates.txt ]
+  then
+    (cd "${CAM_MOUNT}"; xargs -a /tmp/rmcandidates.txt -0 ls -cr1) > /tmp/rmcandidatesbytime.txt
+  fi
+
+  local freespace
+  while read -r line
+  do
+    freespace=$(eval "$(stat --file-system --format="echo \$((%f*%S))" "${CAM_MOUNT}/.")")
+    if ((freespace > 20000000000))
+    then
+      break;
+    fi
+    rm "${CAM_MOUNT}/$line"
+  done < /tmp/rmcandidatesbytime.txt
+
+  # delete directories that are now empty
+  find "$CAM_MOUNT/TeslaCam/RecentClips" "$CAM_MOUNT/TeslaCam/SavedClips" \
+    "$CAM_MOUNT/TeslaCam/SentryClips" "$CAM_MOUNT/TeslaTrackMode" -depth -type d -empty -delete || true
+
+  log "done cleaning cam mount"
 }
 
 # Directory structure car uses:
@@ -330,22 +396,84 @@ function archive_teslacam_clips () {
 
   ensure_cam_file_is_mounted
 
-  # Build lists of the files to be archived.
-  # Two lists are built: one for the folders under TeslaCam, and one for the TeslaTrackMode folder.
+  local -r overlaylower=/mutable/TeslaCam
+  local -r overlayupper=/tmp/cam/upper
+  local -r overlaywork=/tmp/cam/work
+  local -r overlaymerged=/tmp/cam/merged
+
+  rm -rf "$overlayupper" "$overlaywork" "$overlaymerged"
+  mkdir -p "$overlayupper" "$overlaywork" "$overlaymerged"
+
+  mount -t overlay overlay -o "lowerdir=$overlaylower,upperdir=$overlayupper,workdir=$overlaywork" "$overlaymerged"
+
+  # Build list of the files to be archived.
   local -r sentrylist=/tmp/sentry_files
-  local -r ignorelist1=/tmp/ignore_files1
-  (cd "$CAM_MOUNT/TeslaCam"; find . \( \( -path './SavedClips/*' -o -path './SentryClips/*' \) -type f \) \
-        -a \( \( -name '*.mp4' -size -100000c -fprintf "$ignorelist1" '%P\n' \) -o -fprintf "$sentrylist" '%P\n' \) )
+  local -r sentrylist_archived=/tmp/sentry_files_archived
+  local -r sentrylist_previously_archived=/mutable/sentry_files_archived
+  local -r ignorelist=/tmp/ignore_files
 
-  local -r trackmodelist=/tmp/trackmode_files
-  local -r ignorelist2=/tmp/ignore_files2
-  (cd "$CAM_MOUNT"; find . \( -path './TeslaTrackMode/*' -type f \) \
-        -a \( \( -name '*.mp4' -size -100000c -fprintf /dev/stdout '%P\n' \) -o -fprintf "$trackmodelist" '%P\n' \) > "$ignorelist2" )
+  # Find files by name only. Don't follow the symlinks yet, since that
+  # would cause all snapshots to be mounted.
+  local -a savedclipsopt
+  local -a sentryclipsopt
+  local -a trackmodeclipsopt
+  local -a recentclipsopt
+  if [ "${ARCHIVE_SAVEDCLIPS:-true}" = "true" ]
+  then
+    savedclipsopt=("-path" "./SavedClips/*")
+  else
+    savedclipsopt=("-false")
+  fi
+  if [ "${ARCHIVE_SENTRYCLIPS:-true}" = "true" ]
+  then
+    sentryclipsopt=("-o" "-path" "./SentryClips/*")
+  fi
+  if [ "${ARCHIVE_TRACKMODECLIPS:-true}" = "true" ]
+  then
+    trackmodeclipsopt=("-o" "-path" "./TeslaTrackMode/*")
+  fi
+  if [ "${ARCHIVE_RECENTCLIPS:-false}" = "true" ]
+  then
+    recentclipsopt=("-o" "-path" "./RecentClips/*")
+  fi
+  (cd "$overlaylower"; find . \( \( "${savedclipsopt[@]}" "${sentryclipsopt[@]}" "${trackmodeclipsopt[@]}" "${recentclipsopt[@]}" \) -type l \) \
+        -a -fprintf "$sentrylist" '%P\n')
 
-  local -r sentry_count=$(wc -l < "$sentrylist")
-  local -r trackmode_count=$(wc -l < "$trackmodelist")
-  local -r ignore_count1=$(wc -l < "$ignorelist1")
-  local -r ignore_count2=$(wc -l < "$ignorelist2")
+  # Copy lists of previously-archived files from /mutable
+  if [ -r "${sentrylist_previously_archived}" ]
+  then
+    cp "${sentrylist_previously_archived}" "${sentrylist_archived}"
+  fi
+
+  # Remove files that no longer exist in snapshots from the
+  # "previously archived" list, so the list doesn't keep growing.
+  intersect "${sentrylist_archived}" "${sentrylist}"
+
+  # Remove previously-archived files from the archive candidate list
+  prunefile "${sentrylist}" "${sentrylist_archived}"
+
+  # ${sentrylist} is now a list of files that haven't been archived yet.
+  # Remove short recordings from this list. This requires following the
+  # links and looking at the files themselves.
+  if [ -s "${sentrylist}" ]
+  then
+    (cd "$overlaymerged"; xargs -a "${sentrylist}" echo "find -L" | while read -r line
+        do
+          eval "$line \( -name \*.mp4 -a -size -100000c -fprintf ${ignorelist} '%p\n' \) -o -print"
+        done)
+  else
+    touch "${ignorelist}"
+  fi
+
+  # remove the short files from the list of files to be archived
+  prunefile "${sentrylist}" "${ignorelist}"
+
+  # apply custom removals/additions
+  filterfile "${sentrylist}"
+
+  local -r sentry_count=$(grep -c -v TeslaTrackMode "$sentrylist")
+  local -r trackmode_count=$(grep -c TeslaTrackMode "$sentrylist")
+  local -r ignore_count=$(wc -l < "$ignorelist")
   local -r total_count=$((sentry_count + trackmode_count))
 
   # extract some noteworthy info from the file list
@@ -354,51 +482,61 @@ function archive_teslacam_clips () {
 
   local -r event_count=$((saved_event_count + sentry_event_count))
 
-  log "There are $event_count event folder(s) with $sentry_count file(s) and $trackmode_count track mode file(s) to move. $((ignore_count1+ignore_count2)) short recording(s) will be skipped."
+  log "There are $event_count event folder(s) with $sentry_count file(s) and $trackmode_count track mode file(s) to move." \
+      " $ignore_count short recording(s) will be skipped."
 
   if [[ "$total_count" -gt 0 ]]
   then
     log "Starting recording archiving"
     local -r start_ts=$(date --utc --date "now" +%s)
 
-    /root/bin/send-push-message "$TESLAUSB_HOSTNAME:" "Archiving $event_count event folder(s) with $sentry_count file(s) and $trackmode_count track mode file(s) starting at $(date)"
-
-    # Ensure Sentry Mode is enabled before archiving
-    declare is_sentry_mode_enabled
-    if [ -x /root/bin/tesla_api.py ]
+    local message="Archiving "
+    if [[ $sentry_count -gt 0 && $trackmode_count -gt 0 ]]
     then
-        is_sentry_mode_enabled=$(/root/bin/tesla_api.py is_sentry_mode_enabled | tr '[:upper:]' '[:lower:]')
-        if [ "false" = "${is_sentry_mode_enabled}" ]
-        then
-            log "Temporarily enabling Sentry Mode to power the RPi while archive job completes..."
-            /root/bin/tesla_api.py enable_sentry_mode &>> ${LOG_FILE}
-        fi
+      message+="$event_count event folder(s) with $sentry_count file(s) and $trackmode_count track mode file(s)"
+    elif [[ $sentry_count -gt 0 ]]
+    then
+      message+="$event_count event folder(s) with $sentry_count file(s)"
+    else
+      message+="$trackmode_count track mode file(s)"
+    fi
+    message+=" starting at $(date)"
+    /root/bin/send-push-message "$TESLAUSB_HOSTNAME:" "$message" || true
+
+    # setup trigger files
+    local -r triggerdir=/tmp/triggers
+    local -r triggerlist=/tmp/triggers.txt
+    rm -rf "${triggerdir}"
+    mkdir -p "${triggerdir}/SentryClips"
+    mkdir -p "${triggerdir}/SavedClips"
+    mkdir -p "${triggerdir}/RecentClips"
+    true > "${triggerlist}"
+    if [ -n "${TRIGGER_FILE_SAVED+x}" ]
+    then
+      touch "${triggerdir}/SavedClips/${TRIGGER_FILE_SAVED}"
+      echo "SavedClips/${TRIGGER_FILE_SAVED}" >> "${triggerlist}"
+    fi
+    if [ -n "${TRIGGER_FILE_SENTRY+x}" ]
+    then
+      touch "${triggerdir}/SentryClips/${TRIGGER_FILE_SENTRY}"
+      echo "SentryClips/${TRIGGER_FILE_SENTRY}" >> "${triggerlist}"
+    fi
+    if [ -n "${TRIGGER_FILE_RECENT+x}" ]
+    then
+      touch "${triggerdir}/RecentClips/${TRIGGER_FILE_RECENT}"
+      echo "SentryClips/${TRIGGER_FILE_RECENT}" >> "${triggerlist}"
+    fi
+    if [ -n "${TRIGGER_FILE_ANY+x}" ]
+    then
+      touch "${triggerdir}/${TRIGGER_FILE_ANY}"
+      echo "${TRIGGER_FILE_ANY}" >> "${triggerlist}"
     fi
 
-    # Create trigger file for SavedClips
-    if [ -n "${trigger_file_saved+x}" ]
-    then
-        export trigger_file_saved
-    fi
-
-    # Create trigger file for SentryClips
-    if [ -n "${trigger_file_sentry+x}" ]
-    then
-        export trigger_file_sentry
-    fi
-
-    # Create trigger file for Archive root
-    if [ -n "${trigger_file_any+x}" ]
-    then
-        export trigger_file_any
-    fi
-
-    local message
-    if /root/bin/archive-clips.sh "$CAM_MOUNT/TeslaCam" "${sentrylist}" "$CAM_MOUNT" "${trackmodelist}"
+    if /root/bin/archive-clips.sh "$overlaymerged" "${sentrylist}" "${triggerdir}" "${triggerlist}"
     then
       message="Archiving completed successfully. "
     else
-      message+="Error during archiving. "
+      message="Error during archiving. "
     fi
 
     local -i sentry_archived=0
@@ -406,19 +544,26 @@ function archive_teslacam_clips () {
 
     while read -r line
     do
-      if [[ ! -e "$CAM_MOUNT/TeslaCam/$line" ]]
+      if [[ ! -e "$overlaymerged/$line" ]]
       then
-        sentry_archived=$((sentry_archived + 1))
+        case $line in
+          TeslaTrackMode*)
+            trackmode_archived=$((trackmode_archived + 1))
+            ;;
+          *)
+            sentry_archived=$((sentry_archived + 1))
+            ;;
+        esac
+        echo "$line" >> "${sentrylist_archived}"
       fi
     done < ${sentrylist}
 
-    while read -r line
-    do
-      if [[ ! -e "$CAM_MOUNT/$line" ]]
-      then
-        trackmode_archived=$((trackmode_archived + 1))
-      fi
-    done < ${trackmodelist}
+    # copy the list of archived files back to /mutable if it has changed
+    if ! diff -q -N "${sentrylist_archived}" "${sentrylist_previously_archived}" > /dev/null
+    then
+        cp "${sentrylist_archived}" "${sentrylist_previously_archived}.new"
+        mv "${sentrylist_previously_archived}.new" "${sentrylist_previously_archived}"
+    fi
 
     message+="Archived "
     if [[ $sentry_count -gt 0 && $trackmode_count -gt 0 ]]
@@ -435,40 +580,27 @@ function archive_teslacam_clips () {
     message+=" in $(convert_seconds_to_nice_time $delta)"
     /root/bin/send-push-message "$TESLAUSB_HOSTNAME:" "${message}"
 
-    # delete empty directories under SavedClips, SentryClips and TeslaTrackMode
-    rmdir --ignore-fail-on-non-empty "$CAM_MOUNT/TeslaCam/SavedClips"/* "$CAM_MOUNT/TeslaCam/SentryClips"/* "$CAM_MOUNT/TeslaTrackMode"/* || true
-
-    # If Sentry Mode was previously disabled, restore it to that state
-    if [ -x /root/bin/tesla_api.py ]
+    if [ -e /tmp/archive-error.log ]
     then
-      if [ "false" = "${is_sentry_mode_enabled}" ]
-      then
-        log "Restoring Sentry Mode to its previous state (disabled)..."
-        /root/bin/tesla_api.py disable_sentry_mode &>> ${LOG_FILE}
-      fi
+      cat /tmp/archive-error.log >> ${LOG_FILE}
+      rm /tmp/archive-error.log
     fi
-
   fi
 
-  if [[ "$ignore_count1" -gt 0 ]]
+  # overlayfs behavior is undefined if the lower is changed while the overlay is active, so umount first
+  umount "$overlaymerged"
+
+  if [[ "$ignore_count" -gt 0 ]]
   then
     (
       cd "$CAM_MOUNT/TeslaCam"
-      xargs rm -f < "$ignorelist1"
-    )
-  fi
-
-  if [[ "$ignore_count2" -gt 0 ]]
-  then
-    (
+      grep -v TeslaTrackMode "$ignorelist" | xargs rm -f
       cd "$CAM_MOUNT"
-      xargs rm -f < "$ignorelist2"
+      grep TeslaTrackMode "$ignorelist" | xargs rm -f
     )
   fi
 
-  # Delete the files that fsck "recovered". These are generally files
-  # that were deleted previously by the car or teslausb
-  rm -f "${CAM_MOUNT}"/FSCK????.REC
+  clean_cam_mount
 
   # Trim the camera archive to reduce the number of blocks in the snapshot.
   trim_free_space "$CAM_MOUNT"
@@ -598,6 +730,52 @@ function snapshotloop {
   done
 }
 
+function logrotator {
+  while true
+  do
+    mv -f /var/log/nginx/access.log /var/log/nginx/access.log.prev || true
+    mv -f /var/log/nginx/error.log /var/log/nginx/error.log.prev || true
+    if [ -e /var/run/nginx.pid ]
+    then
+      kill -USR1 "$(cat /var/run/nginx.pid)"
+    fi
+    sleep 1800
+  done
+}
+
+function wifichecker {
+  dmesg -w | {
+    while TMOUT=1 read -r line
+    do
+      true
+    done
+    wifi=working
+    while read -r line
+    do
+      case $line in
+        *"failed to enable fw supplicant")
+          if [ "$wifi" = "working" ]
+          then
+            wifi="notworking"
+          else
+            log "restarting wifi because of: $line"
+            modprobe -r brcmfmac cfg80211 brcmutil || true
+            modprobe brcmfmac || true
+            while TMOUT=1 read -r line
+            do
+              true
+            done
+            wifi="working"
+          fi
+          ;;
+        *)
+          wifi=working
+          ;;
+      esac
+    done
+  }
+}
+
 function set_sys_param() {
   local -r parampath="$1"
   local -r var="$2"
@@ -625,11 +803,11 @@ set_sys_param /proc/sys/vm/dirty_background_bytes DIRTY_BACKGROUND_BYTES 65536
 set_sys_param /proc/sys/vm/dirty_ratio DIRTY_RATIO 80
 set_sys_param /sys/devices/system/cpu/cpufreq/policy0/scaling_governor CPU_GOVERNOR conservative
 
-if [ "${SNAPSHOTS_ENABLED:-true}" = "true" ]
-then
-  /root/bin/make_snapshot.sh
-  snapshotloop &
-fi
+/root/bin/make_snapshot.sh
+snapshotloop &
+logrotator &
+
+wifichecker &
 
 fix_errors_in_images
 
@@ -639,7 +817,11 @@ then
 
   set_time
 
+  /root/bin/awake_start || true
+
   archive_clips
+
+  /root/bin/awake_stop || true
 
   doubleblink
 
@@ -662,13 +844,12 @@ do
 
   set_time
 
-  sleep "${archivedelay:-20}"
+  /root/bin/awake_start || true
 
-  if [ "${SNAPSHOTS_ENABLED:-true}" = "true" ]
-  then
-    # take a snapshot before archive_clips starts deleting files
-    /root/bin/make_snapshot.sh
-  fi
+  sleep "${ARCHIVE_DELAY:-20}"
+
+  # take a snapshot before archive_clips starts deleting files
+  /root/bin/make_snapshot.sh
 
   disconnect_usb_drives_from_host
 
@@ -677,6 +858,8 @@ do
   archive_clips
 
   truncate_log
+
+  /root/bin/awake_stop || true
 
   doubleblink
 

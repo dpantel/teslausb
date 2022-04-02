@@ -24,6 +24,7 @@ function read_setup_variables {
   newnamefor[camsize]=CAM_SIZE
   newnamefor[musicsize]=MUSIC_SIZE
   newnamefor[sharename]=SHARE_NAME
+  newnamefor[musicsharename]=MUSIC_SHARE_NAME
   newnamefor[shareuser]=SHARE_USER
   newnamefor[sharepassword]=SHARE_PASSWORD
   newnamefor[tesla_email]=TESLA_EMAIL
@@ -31,6 +32,25 @@ function read_setup_variables {
   newnamefor[tesla_vin]=TESLA_VIN
   newnamefor[timezone]=TIME_ZONE
   newnamefor[usb_drive]=USB_DRIVE
+  newnamefor[archivedelay]=ARCHIVE_DELAY
+  newnamefor[trigger_file_saved]=TRIGGER_FILE_SAVED
+  newnamefor[trigger_file_sentry]=TRIGGER_FILE_SENTRY
+  newnamefor[trigger_file_any]=TRIGGER_FILE_ANY
+  newnamefor[pushover_enabled]=PUSHOVER_ENABLED
+  newnamefor[pushover_user_key]=PUSHOVER_USER_KEY
+  newnamefor[pushover_app_key]=PUSHOVER_APP_KEY
+  newnamefor[gotify_enabled]=GOTIFY_ENABLED
+  newnamefor[gotify_domain]=GOTIFY_DOMAIN
+  newnamefor[gotify_app_token]=GOTIFY_APP_TOKEN
+  newnamefor[gotify_priority]=GOTIFY_PRIORITY
+  newnamefor[ifttt_enabled]=IFTTT_ENABLED
+  newnamefor[ifttt_event_name]=IFTTT_EVENT_NAME
+  newnamefor[ifttt_key]=IFTTT_KEY
+  newnamefor[sns_enabled]=SNS_ENABLED
+  newnamefor[aws_region]=AWS_REGION
+  newnamefor[aws_access_key_id]=AWS_ACCESS_KEY_ID
+  newnamefor[aws_secret_key]=AWS_SECRET_ACCESS_KEY
+  newnamefor[aws_sns_topic_arn]=AWS_SNS_TOPIC_ARN
 
   local oldname
   for oldname in "${!newnamefor[@]}"
@@ -40,23 +60,42 @@ function read_setup_variables {
     then
       local value=${!oldname}
       export $newname="$value"
+      unset $oldname
     fi
   done
 
   # set defaults for things not set in the config
   REPO=${REPO:-marcone}
-  BRANCH=${BRANCH:-main-dev}
+  SNAPSHOTS_ENABLED=${SNAPSHOTS_ENABLED:-true}
+  if [ "$SNAPSHOTS_ENABLED" != "true" ]
+  then
+    BRANCH="no-snapshots"
+    if declare -F setup_progress > /dev/null
+    then
+      setup_progress "WARNING: using '$BRANCH' branch because SNAPSHOTS_ENABLED is not true"
+    else
+      echo "WARNING: using '$BRANCH' branch because SNAPSHOTS_ENABLED is not true"
+    fi
+  else
+    BRANCH=${BRANCH:-main-dev}
+  fi
   CONFIGURE_ARCHIVING=${CONFIGURE_ARCHIVING:-true}
   UPGRADE_PACKAGES=${UPGRADE_PACKAGES:-false}
   export TESLAUSB_HOSTNAME=${TESLAUSB_HOSTNAME:-teslausb}
   SAMBA_ENABLED=${SAMBA_ENABLED:-false}
   SAMBA_GUEST=${SAMBA_GUEST:-false}
-  SNAPSHOTS_ENABLED=${SNAPSHOTS_ENABLED:-true}
   INCREASE_ROOT_SIZE=${INCREASE_ROOT_SIZE:-0}
   export CAM_SIZE=${CAM_SIZE:-90%}
   export MUSIC_SIZE=${MUSIC_SIZE:-0}
   export USB_DRIVE=${USB_DRIVE:-''}
+  export USE_EXFAT=${USE_EXFAT:-false}
 }
+
+if [ "$(. /etc/os-release && echo "$VERSION_ID")" = "9" ]
+then
+  echo "STOP: Stretch-based install is no longer supported. Please flash the latest prebuilt."
+  exit 1
+fi
 
 if [ "$0" = "-bash" ]
 then
@@ -69,6 +108,11 @@ if [ "${BASH_SOURCE[0]}" != "$0" ]
 then
   echo "${BASH_SOURCE[0]} was sourced, setting setup variables"
   read_setup_variables
+  if [ -t 0 ] && ! declare -F log > /dev/null
+  then
+    function log { echo "$@"; }
+    export -f log
+  fi
   return 0 # shouldn't use exit when sourced
 fi
 
@@ -200,8 +244,8 @@ function verify_configuration () {
 }
 
 function curlwrapper () {
-  setup_progress "curl $*"
-  while ! curl --fail "$@"
+  setup_progress "curl $*" > /dev/null
+  while ! curl -s --fail "$@"
   do
     setup_progress "'curl $*' failed, retrying" > /dev/null
     sleep 3
@@ -213,15 +257,26 @@ function get_script () {
   local name="$2"
   local remote_path="${3:-}"
 
-  if [ -z ${CURL_PREFIX:+x} ]
+  if [ -z ${SOURCE_DIR:+x} ]
   then
-    HEAD_VERSION=$(curlwrapper -s "https://api.github.com/repos/$REPO/teslausb/git/refs/heads/$BRANCH" | grep '"sha":' | awk '{print $2}' | sed 's/"\|,//g')
-    BRANCH="$HEAD_VERSION"
-    export CURL_PREFIX=https://raw.githubusercontent.com/"$REPO"/teslausb/"$BRANCH"
+    if declare -F download_sources &> /dev/null
+    then
+      download_sources
+    else
+      export SOURCE_DIR=/tmp/sourcedir
+      umount "$SOURCE_DIR" &> /dev/null || true
+      rm -rf "$SOURCE_DIR"
+      mkdir -p "$SOURCE_DIR"
+      mount -t tmpfs none "$SOURCE_DIR"
+      (
+        cd "$SOURCE_DIR"
+        curlwrapper -L "https://github.com/${REPO}/teslausb/archive/${BRANCH}.tar.gz" | tar zxf - --strip-components=1
+      )
+    fi
   fi
 
   # shellcheck disable=SC2086
-  curlwrapper -o "$local_path/$name" $CURL_PREFIX"/$remote_path/$name"
+  cp "${SOURCE_DIR}/$remote_path/$name" "$local_path/$name"
   chmod +x "$local_path/$name"
   setup_progress "Downloaded $local_path/$name ..."
 }
@@ -239,19 +294,60 @@ function get_common_scripts () {
   get_script /root/bin mount_snapshot.sh run
   get_script /root/bin release_snapshot.sh run
   get_script /root/bin force_sync.sh run
+  get_script /root/bin mountoptsforimage run
+  get_script /root/bin mountimage run
+  get_script /root/bin enable_gadget.sh run
+  get_script /root/bin disable_gadget.sh run
+  ln -sf /root/bin/mountimage /sbin/mount.teslausb
 }
 
-function fix_cmdline_txt_modules_load ()
-{
-  setup_progress "Fixing the modules-load parameter in /boot/cmdline.txt..."
-  cp /boot/cmdline.txt ~
-  sed 's/ modules-load=dwc2,g_ether/ modules-load=dwc2/' ~/cmdline.txt > /boot/cmdline.txt
-  rm ~/cmdline.txt
-  setup_progress "Fixed cmdline.txt."
+# If only the dwc2 module is loaded at boot then the Pi will present
+# itself as a non-responsive USB device until a gadget is created.
+# When connected to a Windows host, this will show as a device with
+# vendor ID 0 (which is invalid), and Windows might pop up an error
+# message saying "USB device not recognized", while a connected Linux
+# host will log messages like "device descriptor read/64, error -110"
+# to the kernel log, and 'lsusb' might hang for over a minute or until
+# a gadget is created.
+# To work around this, make sure the g_ether module is loaded along
+# with dwc2. The archiveloop script will then unload the g_ether
+# module (the attached host will see no device at all at this point)
+# before creating the mass storage gadget.
+function fix_cmdline_txt_modules_load () {
+  # Extract the modules-load portion of the command line.
+  # Note that this not handle spaces in the argument.
+  local curparam
+  curparam=$(grep -P -o " modules.load=[^\s\$]*" /boot/cmdline.txt)
+  if [[ "$curparam" == "" ]]
+  then
+    curparam="\$"
+  elif [[ "$curparam" == *"dwc2"* ]] && [[ "$curparam" == *"g_ether"* ]]
+  then
+    setup_progress "/boot/cmdline.txt is up to date"
+    return
+  fi
+
+  # replace the current parameter
+  setup_progress "Updated /boot/cmdline.txt from:"
+  setup_progress "$(cat /boot/cmdline.txt)"
+  sed -i "s/${curparam}/ modules-load=dwc2,g_ether/" /boot/cmdline.txt
+  setup_progress "to:"
+  setup_progress "$(cat /boot/cmdline.txt)"
 }
 
 BACKINGFILES_MOUNTPOINT=/backingfiles
 MUTABLE_MOUNTPOINT=/mutable
+
+function update_backingfiles_fstab_entry () {
+  local filename="$1"
+  local mountpoint="$2"
+  sed -i "\@^$filename .*@d" /etc/fstab
+  if [ -e "$filename" ]
+  then
+    echo "$filename $mountpoint teslausb noauto 0 0" >> /etc/fstab
+    setup_progress "updated /etc/fstab for $mountpoint"
+  fi
+}
 
 function create_usb_drive_backing_files () {
   if [ ! -e "$BACKINGFILES_MOUNTPOINT" ]
@@ -266,29 +362,61 @@ function create_usb_drive_backing_files () {
 
   /tmp/create-backingfiles-partition.sh "$BACKINGFILES_MOUNTPOINT" "$MUTABLE_MOUNTPOINT"
 
-  if ! findmnt --mountpoint $BACKINGFILES_MOUNTPOINT
+  if ! findmnt --mountpoint $BACKINGFILES_MOUNTPOINT > /dev/null
   then
     setup_progress "Mounting the partition for the backing files..."
     mount $BACKINGFILES_MOUNTPOINT
     setup_progress "Mounted the partition for the backing files."
   fi
 
+  if ! findmnt --mountpoint $MUTABLE_MOUNTPOINT > /dev/null
+  then
+    setup_progress "Mounting the mutable partition..."
+    mount $MUTABLE_MOUNTPOINT
+    setup_progress "Mounted the mutable partition."
+  fi
+
   if [ ! -e $BACKINGFILES_MOUNTPOINT/cam_disk.bin ]
   then
     setup_progress "Creating backing disk files."
-    /tmp/create-backingfiles.sh "$CAM_SIZE" "$MUSIC_SIZE" "$BACKINGFILES_MOUNTPOINT"
-  else
-    # mount cam image and make sure the right directories exist
-    umount /mnt/cam || true
-    if modprobe -r g_mass_storage && mount /mnt/cam
+    /tmp/create-backingfiles.sh "$CAM_SIZE" "$MUSIC_SIZE" "$BACKINGFILES_MOUNTPOINT" "$USE_EXFAT"
+  fi
+
+  update_backingfiles_fstab_entry $BACKINGFILES_MOUNTPOINT/cam_disk.bin /mnt/cam
+  update_backingfiles_fstab_entry $BACKINGFILES_MOUNTPOINT/music_disk.bin /mnt/music
+
+  # mount cam image and make sure the right directories exist
+  umount /mnt/cam > /dev/null || true
+  if /root/bin/disable_gadget.sh && mount /mnt/cam
+  then
+    mkdir -p /mnt/cam/TeslaCam
+    mkdir -p /mnt/cam/TeslaTrackMode
+    touch /mnt/cam/.metadata_never_index
+
+    local -r sentrylist_previously_archived=/mutable/sentry_files_archived
+
+    # For upgrades from before snapshot-archiving, assume everything from the
+    # snapshots -except the files still on the disk image- was already archived,
+    # to avoid re-archiving things that were manually deleted from the archive
+    # server.
+    if [ ! -e "$sentrylist_previously_archived" ] && [ -d "$MUTABLE_MOUNTPOINT/TeslaCam" ]
     then
-      mkdir -p /mnt/cam/TeslaCam
-      mkdir -p /mnt/cam/TeslaTrackMode
-      umount /mnt/cam
-    else
-      setup_progress "STOP: Couldn't check image"
-      exit 1
+      find "$MUTABLE_MOUNTPOINT/TeslaCam" -type l -printf '%P\n' | sort > /tmp/allfiles.txt
+      find /mnt/cam/TeslaCam /mnt/cam/ -type f -printf '%P\n' | sort > /tmp/stilloncard.txt
+      comm -2 -3 /tmp/allfiles.txt /tmp/stilloncard.txt > "$sentrylist_previously_archived"
+      rm -f /tmp/allfiles.txt /tmp/stilloncard.txt
     fi
+
+    umount /mnt/cam
+
+    if mount /mnt/music
+    then
+      touch /mnt/music/.metadata_never_index
+      umount /mnt/music
+    fi
+  else
+    setup_progress "STOP: Couldn't check image"
+    exit 1
   fi
 }
 
@@ -319,7 +447,10 @@ function make_root_fs_readonly () {
 
 function update_package_index () {
   setup_progress "Updating package index files..."
-  while ! apt-get update
+  # the package index might be in a bad state if setup was previously
+  # interrupted, so fix it up first
+  dpkg --configure -a || true
+  while ! (apt-get update || apt-get update --allow-releaseinfo-change)
   do
     setup_progress "Failed, retrying"
     sleep 2
@@ -371,7 +502,15 @@ function set_timezone () {
 # There's probably a better way of doing this.
 # If not, there should be.
 function get_usb_state {
-  local last
+  local current
+  local last;
+  current=$(cat /sys/class/udc/*/state)
+  echo -n "Gadget state: $current"
+  if [ "$current" = "configured" ]
+  then
+    echo
+    return
+  fi
   last=$(dmesg | grep 'g_mass_storage\|dwc2' | tail -1)
   if [ -z "$last" ]
   then
@@ -381,15 +520,16 @@ function get_usb_state {
   local usbstatetime
   usbstatetime=$(echo "$last" | tr -d '[]' | awk '{print $1}')
   now=$(awk '{print $1}' /proc/uptime)
-  awk "BEGIN {printf \"USB state (%.1f seconds ago): \", $now-$usbstatetime}"
+  awk "BEGIN {printf \". %.1f seconds ago: \", $now-$usbstatetime}"
   case $last in
+    # this message is now a debug log and doesn't show in normal builds
     *"Linux File-Backed Storage")
       echo "connected to host and host mounted drive(s)"
       ;;
     *"new device"*)
       ;&
     *"new address"*)
-      echo "connected to host, but host didn't mount drive(s)"
+      echo "connected to host"
       ;;
     *"bound driver"*)
       echo "mass storage ready, but not connected to host (check cable)"
@@ -432,14 +572,17 @@ function cmd_upgrade {
 
 function cmd_upgrade_prepare {
   setup_progress "preparing for full upgrade"
-  killall archiveloop || true
-  service smbd stop || true
-  service autofs stop || true
-  umount /backingfiles/snapshots/snap*/mnt || true
-  umount /mnt/cam /mnt/music || true
-  umount /mnt/archive /mnt/musicarchive || true
-  modprobe -r g_mass_storage
-  /root/bin/remountfs_rw > /dev/null
+  (
+    systemctl stop teslausb || true
+    killall archiveloop || true
+    service smbd stop || true
+    service autofs stop || true
+    umount /backingfiles/snapshots/snap*/mnt || true
+    umount /mnt/cam /mnt/music || true
+    umount /mnt/archive /mnt/musicarchive || true
+    /root/bin/disable_gadget.sh || true
+    /root/bin/remountfs_rw
+  ) &> /dev/null
 }
 
 function cmd_upgrade_finish {
@@ -490,6 +633,11 @@ function cmd_diagnose {
       echo "archive method: ${ARCHIVE_SYSTEM:-unset}"
     fi
 
+    if [[ "$USB_DRIVE" != "" ]]
+    then
+      echo "USB_DRIVE=$USB_DRIVE: consider booting from USB instead."
+    fi
+
     if ! blkid -L backingfiles > /dev/null
     then
       echo "ERROR: backingfiles partition does not exist"
@@ -511,20 +659,16 @@ function cmd_diagnose {
     then
       echo "ERROR: cam disk image not in fstab"
     fi
-    for LUN0 in /sys/devices/platform/soc/??980000.usb/gadget/lun0/file
-    do
-      if [ -e "$LUN0" ]
-      then
-        echo "lun0 connected, from file $(cat "$LUN0")"
-      fi
-    done
-    for LUN1 in /sys/devices/platform/soc/??980000.usb/gadget/lun1/file
-    do
-      if [ -e "$LUN1" ]
-      then
-        echo "lun1 connected, from file $(cat "$LUN1")"
-      fi
-    done
+    LUN0=/sys/kernel/config/usb_gadget/teslausb/functions/mass_storage.0/lun.0/file
+    if [ -e "$LUN0" ]
+    then
+      echo "lun0 connected, from file $(cat "$LUN0")"
+    fi
+    LUN1=/sys/kernel/config/usb_gadget/teslausb/functions/mass_storage.0/lun.1/file
+    if [ -e "$LUN1" ]
+    then
+      echo "lun1 connected, from file $(cat "$LUN1")"
+    fi
     if ! blkid -L mutable > /dev/null
     then
       echo "ERROR: mutable partition does not exist"
@@ -555,6 +699,29 @@ function cmd_diagnose {
       journalctl -u teslausb | tail -30
     fi
 
+    local -r inodes=$(df --output=ipcent /mutable/ | sed 1d | sed 's/[^0-9]//g')
+    if [[ "$inodes" -gt 80 ]]
+    then
+      echo "WARNING: /mutable is low on inodes: ${inodes}% used"
+    fi
+
+    if [[ "$BRANCH" != "main-dev" || "$REPO" != "marcone" ]]
+    then
+      echo "WARNING: using $REPO/$BRANCH"
+    fi
+
+    if [ -x /root/bin/archive-filter ]
+    then
+      echo "Custom archive filter is in use"
+    fi
+
+    read -r offset <<<"$(sfdisk -l -q -o START /backingfiles/cam_disk.bin | tail -1)"
+    fstype=$(blkid --probe -o value -s TYPE --offset $((offset*512)) /backingfiles/cam_disk.bin)
+    if [ "$fstype" = "exfat" ]
+    then
+      echo "CAM drive is formatted as ExFAT. Recommend using FAT32 instead."
+    fi
+
     echo -e "====== disk / images ======"
     parted -s "${BOOT_DEVICE}" print || true
     if [ -n "${USB_DRIVE:+x}" ]
@@ -575,7 +742,7 @@ function cmd_diagnose {
     else
       echo "no music disk image found"
     fi
-
+    df -h /boot/ / /backingfiles/ /mutable/
     echo -e "====== network ======"
     ifconfig
     iwconfig wlan0 | grep Link
@@ -748,14 +915,9 @@ fi
 
 if [ "$SAMBA_ENABLED" = "true" ]
 then
-  if [ "$SNAPSHOTS_ENABLED" = "true" ]
-  then
-    export SAMBA_GUEST
-    get_script /tmp configure-samba.sh setup/pi
-    /tmp/configure-samba.sh
-  else
-    setup_progress "snapshots disabled, skipping Samba configuration"
-  fi
+  export SAMBA_GUEST
+  get_script /tmp configure-samba.sh setup/pi
+  /tmp/configure-samba.sh
 fi
 
 if [ -n "${AP_SSID:+x}" ]
@@ -764,18 +926,38 @@ then
   /tmp/configure-ap.sh
 fi
 
-if [ "$SNAPSHOTS_ENABLED" = "true" ]
-then
-  get_script /tmp configure-automount.sh setup/pi
-  /tmp/configure-automount.sh
-else
-  setup_progress "skipping automount setup because snapshots are disabled"
-fi
+get_script /tmp configure-automount.sh setup/pi
+/tmp/configure-automount.sh
+
+get_script /tmp configure-web.sh setup/pi
+/tmp/configure-web.sh
 
 # source setup-teslausb from .bashrc to set up completion
 if ! grep -q setup-teslausb /root/.bashrc
 then
   echo "source /root/bin/setup-teslausb" >> /root/.bashrc
+fi
+
+# UX courtesy reminders
+if ! grep -q TESLAUSB_TIP1 /root/.bashrc
+then
+  cat >> /root/.bashrc <<- EOC
+	cat << TESLAUSB_TIP1
+	Run 'bin/setup-teslausb upgrade' to update to the latest version of teslausb,
+	or run 'bin/remountfs_rw' to allow writing to the root partition.
+
+	TESLAUSB_TIP1
+	EOC
+fi
+
+if ! grep -q TESLAUSB_TIP1 /home/pi/.bashrc
+then
+  cat >> /home/pi/.bashrc <<- EOC
+	cat << TESLAUSB_TIP1
+	Run 'sudo -i' if you need to make changes.
+
+	TESLAUSB_TIP1
+	EOC
 fi
 
 make_root_fs_readonly

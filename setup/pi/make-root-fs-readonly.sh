@@ -6,6 +6,7 @@ function log_progress () {
   if declare -F setup_progress > /dev/null
   then
     setup_progress "make-root-fs-readonly: $1"
+    return
   fi
   echo "make-root-fs-readonly: $1"
 }
@@ -24,6 +25,10 @@ function append_cmdline_txt_param() {
   fi
 }
 
+function remove_cmdline_txt_param() {
+  sed -i "s/\(\s\)${1}\(\s\|$\)//" /boot/cmdline.txt > /dev/null
+}
+
 log_progress "Disabling unnecessary service..."
 systemctl disable apt-daily.timer
 systemctl disable apt-daily-upgrade.timer
@@ -37,31 +42,37 @@ apt-get -y --force-yes install ntp busybox-syslogd; dpkg --purge rsyslog
 
 log_progress "Configuring system..."
 
-# Add fastboot, noswap and/or ro to end of /boot/cmdline.txt
-append_cmdline_txt_param fastboot
+# Add fsck.mode=auto, noswap and/or ro to end of /boot/cmdline.txt
+# Remove the fastboot paramater because it makes fsck not run
+remove_cmdline_txt_param fastboot
+append_cmdline_txt_param fsck.mode=auto
 append_cmdline_txt_param noswap
 append_cmdline_txt_param ro
+
+# set root and mutable max mount count to 1, so they're checked every boot
+tune2fs -c 1 /dev/disk/by-label/rootfs || log_progress "tune2fs failed for rootfs"
+tune2fs -c 1 /dev/disk/by-label/mutable || log_progress "tune2fs failed for mutable"
 
 # we're not using swap, so delete the swap file for some extra space
 rm -f /var/swap
 
 # Move fake-hwclock.data to /mutable directory so it can be updated
-if ! findmnt --mountpoint /mutable
+if ! findmnt --mountpoint /mutable > /dev/null
 then
-    log_progress "Mounting the mutable partition..."
-    mount /mutable
-    log_progress "Mounted."
+  log_progress "Mounting the mutable partition..."
+  mount /mutable
+  log_progress "Mounted."
 fi
 if [ ! -e "/mutable/etc" ]
 then
-    mkdir -p /mutable/etc
+  mkdir -p /mutable/etc
 fi
 
 if [ ! -L "/etc/fake-hwclock.data" ] && [ -e "/etc/fake-hwclock.data" ]
 then
-    log_progress "Moving fake-hwclock data"
-    mv /etc/fake-hwclock.data /mutable/etc/fake-hwclock.data
-    ln -s /mutable/etc/fake-hwclock.data /etc/fake-hwclock.data
+  log_progress "Moving fake-hwclock data"
+  mv /etc/fake-hwclock.data /mutable/etc/fake-hwclock.data
+  ln -s /mutable/etc/fake-hwclock.data /etc/fake-hwclock.data
 fi
 # By default fake-hwclock is run during early boot, before /mutable
 # has been mounted and so will fail. Delay running it until /mutable
@@ -74,7 +85,7 @@ fi
 # Create a configs directory for others to use
 if [ ! -e "/mutable/configs" ]
 then
-    mkdir -p /mutable/configs
+  mkdir -p /mutable/configs
 fi
 
 # Move /var/spool to /tmp
@@ -93,8 +104,11 @@ fi
 sed -i "s/spool\s*0755/spool 1777/g" /usr/lib/tmpfiles.d/var.conf >/dev/null
 
 # Move dhcpd.resolv.conf to tmpfs
-mv /etc/resolv.conf /tmp/dhcpcd.resolv.conf
-ln -s /tmp/dhcpcd.resolv.conf /etc/resolv.conf
+if [ ! -e /tmp/dhcpcd.resolv.conf ]
+then
+  mv /etc/resolv.conf /tmp/dhcpcd.resolv.conf
+  ln -s /tmp/dhcpcd.resolv.conf /etc/resolv.conf
+fi
 
 # Update /etc/fstab
 # make /boot read-only
